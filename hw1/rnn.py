@@ -24,19 +24,6 @@ import pickle
 import os
 import json
 
-
-# In[3]:
-
-
-SOS_TOKEN = 'SOS'
-EOS_TOKEN = 'EOS'
-SOS_IDX = 0
-EOS_IDS = 1
-SOS_VECTOR = None
-EOS_VECTOR = None
-# BUCKETS = [100, 150, 200, 250, 300, 350, 400, 450, 500, 550, 600, 650, 700, 750, 800]
-
-
 # In[4]:
 
 
@@ -125,28 +112,7 @@ def make_training_data(data, labels, label_to_idx):
 
 
 def get_variable_from_seq(seq, seq_type):
-    if seq_type == 'feature' or seq_type =='f':
-#         tmpk = random.choice(list(data.keys()))
-#         dim = len(data[k]['features'])
-        dim = len(seq[0])
-        global SOS_VECTOR
-        global EOS_VECTOR
-        if SOS_VECTOR is None:
-            SOS_VECTOR = np.random.rand(dim)
-        if EOS_VECTOR is None:
-            EOS_VECTOR = np.random.rand(dim)
-        
-        new_seq = [SOS_VECTOR]
-        new_seq.extend(seq)
-        new_seq.append(EOS_VECTOR)
-        
-    elif seq_type == 'label' or seq_type == 'l':
-
-        new_seq = [SOS_IDX]
-        new_seq.extend(seq)
-        new_seq.append(EOS_IDS)
-    
-    new_seq = np.array(new_seq)
+    new_seq = np.array(seq)
     new_seq = torch.from_numpy(new_seq)
     if seq_type == 'feature' or seq_type =='f':
         new_seq = new_seq.float()
@@ -155,11 +121,8 @@ def get_variable_from_seq(seq, seq_type):
     return new_seq
 
 
-# In[8]:
-
-
 def batchify(fsequences, lsequences):
-    print('Crating batches')
+    print('Creating batches')
     batches = defaultdict(list)
     processed_batches = []
 
@@ -168,10 +131,9 @@ def batchify(fsequences, lsequences):
         fseq_var = get_variable_from_seq(fseq, 'f')
         lseq = lsequences[sent_uid]
         lseq_var = get_variable_from_seq(lseq, 'l')
-        seq_len = len(lseq) + 2
+        seq_len = len(lseq) 
         batches[seq_len].append((fseq_var, lseq_var))
 
-    print(len(batches))
     for batch in batches.values():
 #         print(len(batch))
         fbatch = [pair[0].unsqueeze(1) for pair in batch]
@@ -189,12 +151,9 @@ def batchify(fsequences, lsequences):
     return processed_batches
 
 
-# In[9]:
-
-
 USE_CUDA = torch.cuda.is_available()
 GPUID = 0
-HIDDEN_SIZE = 128
+HIDDEN_DIM = 128
 N_LAYER = 1
 
 
@@ -295,7 +254,7 @@ def trainEpochs(lstm, fsequences, lsequences, learning_rate, n_epochs, print_eve
     print('total number of batch: %d'%(n_batches))
     
 #     ts = "%d"%(time.time())
-#     PN = 'BS-'+str(BATCH_LENGTH)+'_HS-'+str(HIDDEN_SIZE)+'_AM-'+str(ATTN_METHOD)\
+#     PN = 'BS-'+str(BATCH_LENGTH)+'_HS-'+str(HIDDEN_DIM)+'_AM-'+str(ATTN_METHOD)\
 #         +'_DR-'+str(DECODER_DROPOUT)+'_EP-'+str(NUM_EPOCH)+'_LR-'+str(LEARNING_RATE)
 
     for epoch in range(1, n_epochs+1):
@@ -347,14 +306,13 @@ def trainEpochs(lstm, fsequences, lsequences, learning_rate, n_epochs, print_eve
 # In[50]:
 
 
-NUM_EPOCH = 100
+NUM_EPOCH = 1000
 PRINT_EVERY = 5
-SAVE_EVERY = 5
+SAVE_EVERY = 50
 LEARNING_RATE = 0.01
 TESTING_NUM = 5
-PARAMS = {'SOS_TOKEN':SOS_TOKEN, 'EOS_TOKEN':EOS_TOKEN, SOS_IDX:'SOS_IDX', EOS_IDS:'EOS_IDS',
-          'GPUID':GPUID, 'HIDDEN_SIZE':HIDDEN_SIZE, 'N_LAYER':N_LAYER,'NUM_EPOCH':NUM_EPOCH, 
-          'LEARNING_RATE':LEARNING_RATE}
+PARAMS = {'GPUID':GPUID, 'HIDDEN_DIM':HIDDEN_DIM, 'N_LAYER':N_LAYER,'NUM_EPOCH':NUM_EPOCH, 
+          		'LEARNING_RATE':LEARNING_RATE}
 DATA_PATH = 'data'
 SAVE_PATH = 'models'
 SAVE_PREFIX = ''
@@ -368,8 +326,7 @@ def main():
     data = read_ark('data/mfcc/train.ark')
     labels = read_label_data('data/train.lab')
 
-    idx_to_label = [SOS_TOKEN, EOS_TOKEN]
-    idx_to_label.extend(list(set(labels.values())))
+    idx_to_label = list(set(labels.values()))
     label_to_idx = {l:i for i, l in enumerate(idx_to_label)}
 
     print(len(data))
@@ -397,7 +354,7 @@ def main():
     PARAMS['output_dim'] = output_dim
     
     lstm = LSTMRecognizer(input_dim = input_dim, 
-                          hidden_dim = HIDDEN_SIZE, 
+                          hidden_dim = HIDDEN_DIM, 
                           output_dim = output_dim, 
                           n_layers = N_LAYER)
 
@@ -407,27 +364,27 @@ def main():
         print('using CUDA models')
         lstm = lstm.cuda(GPUID)
 
-    # tmpf= {}
-    # tmpl= {}
-    # for i, key in enumerate(list(fsequences.keys())):
-        # tmpf[key] = fsequences[key]
-        # tmpl[key] = lsequences[key]
-        # if i > 5:
-            # break
+    tmpf= {}
+    tmpl= {}
+    for i, key in enumerate(list(fsequences.keys())):
+        tmpf[key] = fsequences[key]
+        tmpl[key] = lsequences[key]
+        if i > 5:
+            break
 
     # save models and data to file
     if not os.path.exists(SAVE_PATH):
         os.makedirs(SAVE_PATH)
 
     ts = "%d"%(time.time())
-    params = '{}_HS_{}_EP_{}_LR_{}'.format(SAVE_PREFIX, HIDDEN_SIZE, NUM_EPOCH, LEARNING_RATE)
+    params = '{}_HS_{}_EP_{}_LR_{}'.format(SAVE_PREFIX, HIDDEN_DIM, NUM_EPOCH, LEARNING_RATE)
     sub_path = os.path.join(SAVE_PATH,params)
     if not os.path.exists(sub_path):
         os.makedirs(sub_path)
     else:
         sub_path = sub_path+ '_' + ts
         os.makedirs(sub_path)
-    pickle.dump((idx_to_label, SOS_VECTOR, EOS_VECTOR), open(os.path.join(sub_path,'data.pkl'), 'wb'))
+    pickle.dump(idx_to_label, open(os.path.join(sub_path,'labels.pkl'), 'wb'))
     json.dump(PARAMS, open(os.path.join(sub_path, 'params.json'),'w'))
 
     # main training process
