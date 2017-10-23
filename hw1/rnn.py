@@ -14,7 +14,7 @@ from torch.autograd import Variable
 # In[30]:
 
 
-from tqdm import tqdm 
+#from tqdm import tqdm 
 from collections import defaultdict
 # from itertools import chain
 import random
@@ -195,20 +195,22 @@ def timeSince(since, percent):
 
 class LSTMRecognizer(nn.Module):
 
-    def __init__(self, input_dim, hidden_dim, output_dim, n_layers=1):
+    def __init__(self, input_dim, hidden_dim, output_dim, n_layers=1, bidirectional = False):
         super(LSTMRecognizer, self).__init__()
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.n_layers = n_layers
+        self.direction = 2 if bidirectional else 1
 
-        self.lstm = nn.LSTM(input_dim, hidden_dim)
+        self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers=n_layers, bidirectional=bidirectional)
 
         # The linear layer that maps from hidden state space to tag space
-        self.hidden2frame = nn.Linear(hidden_dim, output_dim)
+        self.hidden2frame = nn.Linear(hidden_dim*self.direction, output_dim)
         self.LogSoftmax = nn.LogSoftmax()
 
+    #@staticmethod
     def initHidden(self, n_sample):
-        result = Variable(torch.zeros(self.n_layers, n_sample, self.hidden_dim))
+        result = Variable(torch.zeros(self.n_layers * self.direction, n_sample, self.hidden_dim))
         if USE_CUDA:
             return result.cuda(GPUID)
         else:
@@ -222,14 +224,16 @@ class LSTMRecognizer(nn.Module):
             cell = self.initHidden(input_.size()[1])
         
         seq_len = input_.size()[0]
+        n_sample = input_.size()[1]
 
+        # import pdb; pdb.set_trace()
         output = input_
-        for _ in range(self.n_layers):
-            output, (hidden, cell) = self.lstm(output, (hidden, cell))
+        # for _ in range(self.n_layers):
+        output, (hidden, cell) = self.lstm(output, (hidden, cell))
         
         results = []
         for i in range(seq_len):
-            dist = self.LogSoftmax(self.hidden2frame(output[i,:,:]))
+            dist = self.LogSoftmax(self.hidden2frame(output[i,:,:]))  #view(n_sample, self.hidden_dim*self.direction )
             results.append(dist)
         return results 
 
@@ -281,7 +285,7 @@ def trainEpochs(lstm, fsequences, lsequences, learning_rate, n_epochs, print_eve
             b += 1
             input_variable = fbatch.cuda(GPUID) if USE_CUDA else fbatch
             target_variable = lbatch.cuda(GPUID) if USE_CUDA else lbatch
-            predicts, loss, = train(input_variable, target_variable, lstm, optimizer, criterion)
+            predicts, loss = train(input_variable, target_variable, lstm, optimizer, criterion)
             print_loss_total += loss
 
         if epoch % print_every == 0:
@@ -322,7 +326,8 @@ def trainEpochs(lstm, fsequences, lsequences, learning_rate, n_epochs, print_eve
 USE_CUDA = torch.cuda.is_available()
 GPUID = 0
 HIDDEN_DIM = 128
-N_LAYER = 1
+N_LAYER = 2
+BIDIRECTIONAL = False
 BUCKETS = [10, 50, 100, 150, 200, 250 ,300, 350, 400, 450, 500, 550, 600, 650, 750, 800 ]
 BATCH_LENGTH  = 256
 PAD_TOKEN = 'PAD'
@@ -334,8 +339,9 @@ PRINT_EVERY = 1
 SAVE_EVERY = 1
 LEARNING_RATE = 0.01
 TESTING_NUM = 5
-PARAMS = {'GPUID':GPUID, 'HIDDEN_DIM':HIDDEN_DIM, 'N_LAYER':N_LAYER,'NUM_EPOCH':NUM_EPOCH, 
-          		'LEARNING_RATE':LEARNING_RATE, 'BATCH_LENGTH': BATCH_LENGTH, 'PAD_IDX':PAD_IDX}
+PARAMS = {'GPUID':GPUID, 'HIDDEN_DIM':HIDDEN_DIM, 'N_LAYER':N_LAYER, 'BIDIRECTIONAL':BIDIRECTIONAL,
+'NUM_EPOCH':NUM_EPOCH, 'LEARNING_RATE':LEARNING_RATE, 'BATCH_LENGTH': BATCH_LENGTH, 'PAD_IDX':PAD_IDX}
+
 DATA_PATH = 'data'
 SAVE_PATH = 'models'
 
@@ -379,7 +385,8 @@ def main():
     lstm = LSTMRecognizer(input_dim = input_dim, 
                           hidden_dim = HIDDEN_DIM, 
                           output_dim = output_dim, 
-                          n_layers = N_LAYER)
+                          n_layers = N_LAYER,
+                          bidirectional = BIDIRECTIONAL)
 
     print(lstm)
 
@@ -400,7 +407,7 @@ def main():
         os.makedirs(SAVE_PATH)
 
     ts = "%d"%(time.time())
-    params = '{}_HS_{}_EP_{}_LR_{}'.format(SAVE_PREFIX, HIDDEN_DIM, NUM_EPOCH, LEARNING_RATE)
+    params = '{}_HS_{}_EP_{}_LR_{}_BIDIR_{}'.format(SAVE_PREFIX, HIDDEN_DIM, NUM_EPOCH, LEARNING_RATE, int(BIDIRECTIONAL))
     sub_path = os.path.join(SAVE_PATH,params)
     if not os.path.exists(sub_path):
         os.makedirs(sub_path)
