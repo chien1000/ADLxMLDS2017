@@ -120,6 +120,19 @@ def get_variable_from_seq(seq, seq_type):
     
     return new_seq
 
+def pad_seq(sequence, max_length, seq_type):
+    diff = max_length - len(sequence)    
+    if seq_type == 'features' or seq_type == 'f':
+        dim = len(sequence[0])
+        zero_v = np.zeros(dim)
+        new_seq = sequence
+        for _ in range(diff):
+            new_seq.append(zero_v)
+
+    elif seq_type == 'labels' or seq_type == 'l':
+        new_seq = sequence + [PAD_IDX] * diff
+
+    return new_seq
 
 def batchify(fsequences, lsequences):
     print('Creating batches')
@@ -128,33 +141,37 @@ def batchify(fsequences, lsequences):
 
     for sent_uid in fsequences:
         fseq = fsequences[sent_uid]
-        fseq_var = get_variable_from_seq(fseq, 'f')
         lseq = lsequences[sent_uid]
-        lseq_var = get_variable_from_seq(lseq, 'l')
+
         seq_len = len(lseq) 
-        batches[seq_len].append((fseq_var, lseq_var))
+        for b in BUCKETS:
+            use_bucket = b
+            if seq_len < b:
+                break
+
+        fseq = pad_seq(fseq, use_bucket, 'f')
+        lseq = pad_seq(lseq, use_bucket, 'l')
+
+        fseq_var = get_variable_from_seq(fseq, 'f')
+        lseq_var = get_variable_from_seq(lseq, 'l')
+
+        batches[use_bucket].append((fseq_var, lseq_var))
 
     for batch in batches.values():
 #         print(len(batch))
         fbatch = [pair[0].unsqueeze(1) for pair in batch]
         lbatch = [pair[1].unsqueeze(1) for pair in batch]
-        fbatch = torch.cat(fbatch, 1)
+        fbatch = torch.cat(fbatch, 1) #seq, batch, feature_dim
         lbatch = torch.cat(lbatch, 1)
+
+        for pair in zip(fbatch.split(BATCH_LENGTH), lbatch.split(BATCH_LENGTH)):
+            processed_batches.append(pair)
 
     #     torch.transpose(fbatch, 0, 1)
     #     torch.transpose(lbatch, 0, 1)
 #         print(fbatch.size())
 #         print(lbatch.size())
-
-        processed_batches.append((fbatch, lbatch))
-
     return processed_batches
-
-
-USE_CUDA = torch.cuda.is_available()
-GPUID = 0
-HIDDEN_DIM = 128
-N_LAYER = 1
 
 
 # In[10]:
@@ -252,11 +269,7 @@ def trainEpochs(lstm, fsequences, lsequences, learning_rate, n_epochs, print_eve
     batches = batchify(fsequences, lsequences)
     n_batches = len(batches)
     print('total number of batch: %d'%(n_batches))
-    
-#     ts = "%d"%(time.time())
-#     PN = 'BS-'+str(BATCH_LENGTH)+'_HS-'+str(HIDDEN_DIM)+'_AM-'+str(ATTN_METHOD)\
-#         +'_DR-'+str(DECODER_DROPOUT)+'_EP-'+str(NUM_EPOCH)+'_LR-'+str(LEARNING_RATE)
-
+  
     for epoch in range(1, n_epochs+1):
         # set model for training
         lstm.train()
@@ -306,16 +319,25 @@ def trainEpochs(lstm, fsequences, lsequences, learning_rate, n_epochs, print_eve
 # In[50]:
 
 
-NUM_EPOCH = 1000
-PRINT_EVERY = 5
-SAVE_EVERY = 50
+USE_CUDA = torch.cuda.is_available()
+GPUID = 0
+HIDDEN_DIM = 128
+N_LAYER = 1
+BUCKETS = [10, 50, 100, 150, 200, 250 ,300, 350, 400, 450, 500, 550, 600, 650, 750, 800 ]
+BATCH_LENGTH  = 256
+PAD_TOKEN = 'PAD'
+PAD_IDX = 0
+
+SAVE_PREFIX = 'test'
+NUM_EPOCH = 1
+PRINT_EVERY = 1
+SAVE_EVERY = 1
 LEARNING_RATE = 0.01
 TESTING_NUM = 5
 PARAMS = {'GPUID':GPUID, 'HIDDEN_DIM':HIDDEN_DIM, 'N_LAYER':N_LAYER,'NUM_EPOCH':NUM_EPOCH, 
-          		'LEARNING_RATE':LEARNING_RATE}
+          		'LEARNING_RATE':LEARNING_RATE, 'BATCH_LENGTH': BATCH_LENGTH, 'PAD_IDX':PAD_IDX}
 DATA_PATH = 'data'
 SAVE_PATH = 'models'
-SAVE_PREFIX = ''
 
 
 # In[48]:
@@ -326,7 +348,8 @@ def main():
     data = read_ark('data/mfcc/train.ark')
     labels = read_label_data('data/train.lab')
 
-    idx_to_label = list(set(labels.values()))
+    idx_to_label = [PAD_TOKEN]
+    idx_to_label.extend(list(set(labels.values())))
     label_to_idx = {l:i for i, l in enumerate(idx_to_label)}
 
     print(len(data))
