@@ -139,12 +139,16 @@ def pad_seq(sequence, max_length, seq_type):
 
     return new_seq
 
-def batchify(fsequences, lsequences):
+def batchify(fsequences, lsequences, shuffle=True):
     print('Creating batches')
     batches = defaultdict(list)
     processed_batches = []
 
-    for sent_uid in fsequences:
+    sent_uids = list(fsequences.keys())
+    if shuffle:
+        random.shuffle(sent_uids)
+
+    for sent_uid in sent_uids:
         fseq = fsequences[sent_uid]
         lseq = lsequences[sent_uid]
 
@@ -210,7 +214,8 @@ class LSTMRecognizer(nn.Module):
         self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers=n_layers, bidirectional=bidirectional)
 
         # The linear layer that maps from hidden state space to tag space
-        self.hidden2frame = nn.Linear(hidden_dim*self.direction, output_dim)
+        self.h2h = nn.Linear(hidden_dim*self.direction, hidden_dim)
+        self.hidden2frame = nn.Linear(hidden_dim, output_dim)
         self.LogSoftmax = nn.LogSoftmax()
 
     #@staticmethod
@@ -235,12 +240,13 @@ class LSTMRecognizer(nn.Module):
         output = input_
         # for _ in range(self.n_layers):
         output, (hidden, cell) = self.lstm(output, (hidden, cell))
-        
         output = F.relu(output)
         
         results = []
         for i in range(seq_len):
-            dist = self.LogSoftmax(self.hidden2frame(output[i,:,:]))  #view(n_sample, self.hidden_dim*self.direction )
+            h_output = self.h2h(output[i,:,:])
+            h_output = F.relu(h_output)
+            dist = self.LogSoftmax(self.hidden2frame(h_output))  
             results.append(dist)
         return results 
 
