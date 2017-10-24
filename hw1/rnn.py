@@ -111,8 +111,13 @@ def make_training_data(data, labels, label_to_idx):
 # In[20]:
 
 
-def get_variable_from_seq(seq, seq_type):
-    new_seq = np.array(seq)
+def get_variable_from_seq(seq, seq_type, max_length=None):
+    if max_length is not None:
+        new_seq = pad_seq(seq, max_length, seq_type)
+    else:
+        new_seq = seq
+
+    new_seq = np.array(new_seq)
     new_seq = torch.from_numpy(new_seq)
     if seq_type == 'feature' or seq_type =='f':
         new_seq = new_seq.float()
@@ -149,11 +154,11 @@ def batchify(fsequences, lsequences):
             if seq_len < b:
                 break
 
-        fseq = pad_seq(fseq, use_bucket, 'f')
-        lseq = pad_seq(lseq, use_bucket, 'l')
+        # fseq = pad_seq(fseq, use_bucket, 'f')
+        # lseq = pad_seq(lseq, use_bucket, 'l')
 
-        fseq_var = get_variable_from_seq(fseq, 'f')
-        lseq_var = get_variable_from_seq(lseq, 'l')
+        fseq_var = get_variable_from_seq(fseq, 'f', use_bucket)
+        lseq_var = get_variable_from_seq(lseq, 'l', use_bucket)
 
         batches[use_bucket].append((fseq_var, lseq_var))
 
@@ -265,7 +270,7 @@ def train(input_variable, target_variable, lstm, optimizer, criterion):
 
     return predict_idx, loss.data[0] / seq_len
 
-def trainEpochs(lstm, fsequences, lsequences, learning_rate, n_epochs, print_every, save_every, save_path, test_pairs=None):
+def trainEpochs(lstm, fsequences, lsequences, learning_rate, n_epochs, print_every, test_every, save_every, save_path, test_pairs=None):
     start = time.time()
     print_loss_total = 0  # Reset every print_every
 
@@ -300,9 +305,21 @@ def trainEpochs(lstm, fsequences, lsequences, learning_rate, n_epochs, print_eve
             pre_ans = zip([aframe[0,0] for aframe in predicts], target_variable.data[:,0].tolist())
             print('predicts, ans')
             print([(p,a) for p, a in pre_ans if p!=a])
-            
+
+        if epoch % test_every == 0:
             if test_pairs:
-                features, labels = test_pairs[0], test_pairs[1]
+                max_len = max(list(map(len,  [pair[1] for pair in test_pairs])))
+                print(max_len)
+
+                features = [get_variable_from_seq(pair[0], 'f', max_len) for pair in test_pairs]
+                labels = [get_variable_from_seq(pair[1], 'l', max_len) for pair in test_pairs]
+                features = [f.unsqueeze(1) for f in features]
+                labels = [lab.unsqueeze(1) for lab in labels]
+                features = torch.cat(features, 1) #seq, batch, feature_dim
+                labels = torch.cat(labels, 1)
+                features = features.cuda(GPUID) if USE_CUDA else features
+                labels = labels.cuda(GPUID) if USE_CUDA else labels
+
                 print('-------testing with testing data----------')
                 results = lstm(features)
                 predicts = []
@@ -311,9 +328,14 @@ def trainEpochs(lstm, fsequences, lsequences, learning_rate, n_epochs, print_eve
                     topv, topi = dist.data.topk(1, 1)
                     predicts.append(topi)
                 
+                error_count = 0 
+                total = 0
                 for i in range(features.size()[1]): #batch length 
-                    print('~~~', [aframe[i,0] for aframe in predicts])
-                    print('===', target_variable.data[:,i].tolist() )
+                    for j in range(features.size()[0]): #seq length
+                        if predicts[j][i,0] != labels.data[j,i]:
+                            error_count +=1
+                        total +=1
+                print('error rate: {} / {} = {}'.format(error_count, total, error_count/total))
             
         if epoch % save_every ==0:
             # set model for evaluate
@@ -327,20 +349,21 @@ def trainEpochs(lstm, fsequences, lsequences, learning_rate, n_epochs, print_eve
 
 USE_CUDA = torch.cuda.is_available()
 GPUID = 0
-HIDDEN_DIM = 256
-N_LAYER = 3
+HIDDEN_DIM = 64
+N_LAYER = 1
 BIDIRECTIONAL = False
 BUCKETS = [10, 50, 100, 150, 200, 250 ,300, 350, 400, 450, 500, 550, 600, 650, 750, 800 ]
 BATCH_LENGTH  = 256
 PAD_TOKEN = 'PAD'
 PAD_IDX = 0
 
-SAVE_PREFIX = '3layer_70dim_hs256'
-NUM_EPOCH = 1000
-PRINT_EVERY = 5
+SAVE_PREFIX = 'TEST'
+NUM_EPOCH = 3
+PRINT_EVERY = 1
+TEST_EVERY = 1
 SAVE_EVERY = 50
 LEARNING_RATE = 0.01
-TESTING_NUM = 5
+TESTING_NUM = 100
 PARAMS = {'GPUID':GPUID, 'HIDDEN_DIM':HIDDEN_DIM, 'N_LAYER':N_LAYER, 'BIDIRECTIONAL':BIDIRECTIONAL,
 'NUM_EPOCH':NUM_EPOCH, 'LEARNING_RATE':LEARNING_RATE, 'BATCH_LENGTH': BATCH_LENGTH, 'PAD_IDX':PAD_IDX}
 
@@ -378,6 +401,20 @@ def main():
     print('max sequence length: {}'.format(max(seq_len)))
     print('min sequence length: {}'.format(min(seq_len)))
     print('average sequence length: {}'.format(sum(seq_len)/len(seq_len)))
+
+
+    train_fseq, test_fseq = {}, {}
+    train_lseq, test_lseq = {}, {}
+    shuffled_keys = list(fsequences.keys())
+    random.shuffle(shuffled_keys)
+    for i, skey in enumerate(shuffled_keys):
+        if i < TESTING_NUM:
+            test_fseq[skey] = fsequences[skey]
+            test_lseq[skey] = lsequences[skey]
+        else:
+            train_fseq[skey] = fsequences[skey]
+            train_lseq [skey] = lsequences[skey]
+    print("training num = {} {} testing num ={} {}".format(len(train_fseq), len(train_lseq), len(test_fseq), len(test_lseq)))
 
     input_dim = len(list(fsequences.values())[0][0])
     output_dim = len(idx_to_label)
@@ -421,14 +458,15 @@ def main():
 
     # main training process
     plot_losses = trainEpochs(lstm = lstm, 
-                              fsequences = fsequences, 
-                              lsequences = lsequences, 
+                              fsequences = train_fseq, 
+                              lsequences = train_lseq, 
                               learning_rate = LEARNING_RATE, 
                               n_epochs = NUM_EPOCH, 
                               print_every = PRINT_EVERY, 
                               save_every = SAVE_EVERY, 
+                              test_every = TEST_EVERY,
                               save_path = sub_path,
-                              test_pairs=None)
+                              test_pairs = [ (test_fseq[suid], test_lseq[suid]) for suid in test_fseq])
 
     # set model for evaluation
     lstm.eval()
