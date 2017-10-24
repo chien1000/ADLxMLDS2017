@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 from torch import optim
 from torch.autograd import Variable
-
+import torch.nn.functional as F
 
 # In[30]:
 
@@ -231,6 +231,8 @@ class LSTMRecognizer(nn.Module):
         # for _ in range(self.n_layers):
         output, (hidden, cell) = self.lstm(output, (hidden, cell))
         
+        output = F.relu(output)
+        
         results = []
         for i in range(seq_len):
             dist = self.LogSoftmax(self.hidden2frame(output[i,:,:]))  #view(n_sample, self.hidden_dim*self.direction )
@@ -325,18 +327,18 @@ def trainEpochs(lstm, fsequences, lsequences, learning_rate, n_epochs, print_eve
 
 USE_CUDA = torch.cuda.is_available()
 GPUID = 0
-HIDDEN_DIM = 128
-N_LAYER = 2
+HIDDEN_DIM = 256
+N_LAYER = 3
 BIDIRECTIONAL = False
 BUCKETS = [10, 50, 100, 150, 200, 250 ,300, 350, 400, 450, 500, 550, 600, 650, 750, 800 ]
 BATCH_LENGTH  = 256
 PAD_TOKEN = 'PAD'
 PAD_IDX = 0
 
-SAVE_PREFIX = 'test'
-NUM_EPOCH = 1
-PRINT_EVERY = 1
-SAVE_EVERY = 1
+SAVE_PREFIX = '3layer_70dim_hs256'
+NUM_EPOCH = 1000
+PRINT_EVERY = 5
+SAVE_EVERY = 50
 LEARNING_RATE = 0.01
 TESTING_NUM = 5
 PARAMS = {'GPUID':GPUID, 'HIDDEN_DIM':HIDDEN_DIM, 'N_LAYER':N_LAYER, 'BIDIRECTIONAL':BIDIRECTIONAL,
@@ -351,7 +353,7 @@ SAVE_PATH = 'models'
 
 def main():
 
-    data = read_ark('data/mfcc/train.ark')
+    data = read_ark('data/fbank/train.ark')
     labels = read_label_data('data/train.lab')
 
     idx_to_label = [PAD_TOKEN]
