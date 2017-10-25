@@ -101,6 +101,7 @@ def make_prediction(model, fsequences, idx_to_label, map48_to39_path, map_phone_
     if use_cuda:
         model = model.cuda()
 
+    model.eval()
     for usid, seq in fsequences.items():
         seq_var = get_variable_from_seq(seq, 'f')
         seq_var = seq_var.unsqueeze(1)
@@ -162,11 +163,13 @@ def main(model_dir, data_dir, output_fname):
     model = LSTMRecognizer(input_dim = params['input_dim'], 
                               hidden_dim = params['HIDDEN_DIM'], 
                               output_dim = params['output_dim'], 
-                              n_layers = params['N_LAYER'])
+                              n_layers = params['N_LAYER'],
+                              bidirectional = params['BIDIRECTIONAL'],
+                              dropout_rate = params['DROPOUT_RATE'])
     model.load_state_dict(torch.load(model_path, map_location={'cuda:0': 'cpu','cuda:1':'cpu','cuda:2':'cpu','cuda:3':'cpu'}))
 
 
-    test = read_ark(os.path.join(data_dir, 'mfcc/test.ark'))
+    test = read_ark(os.path.join(data_dir, 'fbank/test.ark'))
     for k in test:
         print(k)
         print(test[k])

@@ -204,17 +204,18 @@ def timeSince(since, percent):
 
 class LSTMRecognizer(nn.Module):
 
-    def __init__(self, input_dim, hidden_dim, output_dim, n_layers=1, bidirectional = False):
+    def __init__(self, input_dim, hidden_dim, output_dim, n_layers=1, bidirectional = False, dropout_rate=0):
         super(LSTMRecognizer, self).__init__()
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.n_layers = n_layers
         self.direction = 2 if bidirectional else 1
 
-        self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers=n_layers, bidirectional=bidirectional)
+        self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers=n_layers, bidirectional=bidirectional, dropout = dropout_rate)
 
         # The linear layer that maps from hidden state space to tag space
         self.h2h = nn.Linear(hidden_dim*self.direction, hidden_dim)
+        self.h_dropout = nn.Dropout(p= dropout_rate)
         self.hidden2frame = nn.Linear(hidden_dim, output_dim)
         self.LogSoftmax = nn.LogSoftmax()
 
@@ -246,6 +247,7 @@ class LSTMRecognizer(nn.Module):
         for i in range(seq_len):
             h_output = self.h2h(output[i,:,:])
             h_output = F.relu(h_output)
+            h_output = self.h_dropout(h_output)
             dist = self.LogSoftmax(self.hidden2frame(h_output))  
             results.append(dist)
         return results 
@@ -281,6 +283,7 @@ def trainEpochs(lstm, fsequences, lsequences, learning_rate, n_epochs, print_eve
     print_loss_total = 0  # Reset every print_every
 
     optimizer = optim.Adagrad(lstm.parameters(), lr=learning_rate)
+    # optimizer = optim.RMSprop(lstm.parameters(), lr=learning_rate, momentum=0.1)
     criterion = nn.NLLLoss()
     
     batches = batchify(fsequences, lsequences)
@@ -294,7 +297,7 @@ def trainEpochs(lstm, fsequences, lsequences, learning_rate, n_epochs, print_eve
         print('epoch:{}/{}'.format(epoch, n_epochs))
         b = 1
         for fbatch, lbatch in batches:
-            print('[%d/%d]'%(b,n_batches),end='\r')
+            # print('[%d/%d]'%(b,n_batches),end='\r')
             b += 1
             input_variable = fbatch.cuda(GPUID) if USE_CUDA else fbatch
             target_variable = lbatch.cuda(GPUID) if USE_CUDA else lbatch
@@ -308,12 +311,22 @@ def trainEpochs(lstm, fsequences, lsequences, learning_rate, n_epochs, print_eve
                                          epoch, epoch / n_epochs * 100, print_loss_avg))
             
             print('-------testing with training data----------')
-            pre_ans = zip([aframe[0,0] for aframe in predicts], target_variable.data[:,0].tolist())
-            print('predicts, ans')
-            print([(p,a) for p, a in pre_ans if p!=a])
+            # pre_ans = zip([aframe[0,0] for aframe in predicts], target_variable.data[:,0].tolist())
+            # print('predicts, ans')
+            # print([(p,a) for p, a in pre_ans if p!=a])
+            error_count = 0 
+            total = 0
+            for i in range(input_variable.size()[1]): #batch length 
+                for j in range(input_variable.size()[0]): #seq length
+                    if predicts[j][i,0] != target_variable.data[j,i]:
+                        error_count +=1
+                    total +=1
+            print('error rate: {} / {} = {}'.format(error_count, total, error_count/total))
+        
 
         if epoch % test_every == 0:
             if test_pairs:
+                lstm.eval()
                 max_len = max(list(map(len,  [pair[1] for pair in test_pairs])))
                 print(max_len)
 
@@ -355,23 +368,25 @@ def trainEpochs(lstm, fsequences, lsequences, learning_rate, n_epochs, print_eve
 
 USE_CUDA = torch.cuda.is_available()
 GPUID = 0
-HIDDEN_DIM = 64
-N_LAYER = 1
-BIDIRECTIONAL = False
+HIDDEN_DIM = 256
+N_LAYER = 2
+BIDIRECTIONAL = True
+DROPOUT_RATE = 0.4
 BUCKETS = [10, 50, 100, 150, 200, 250 ,300, 350, 400, 450, 500, 550, 600, 650, 750, 800 ]
-BATCH_LENGTH  = 256
+BATCH_LENGTH  = 100
 PAD_TOKEN = 'PAD'
 PAD_IDX = 0
 
-SAVE_PREFIX = 'TEST'
-NUM_EPOCH = 3
-PRINT_EVERY = 1
-TEST_EVERY = 1
-SAVE_EVERY = 50
+SAVE_PREFIX = 'dropout'
+NUM_EPOCH = 1500
+PRINT_EVERY = 5
+TEST_EVERY = 10
+SAVE_EVERY = 20
 LEARNING_RATE = 0.01
 TESTING_NUM = 100
 PARAMS = {'GPUID':GPUID, 'HIDDEN_DIM':HIDDEN_DIM, 'N_LAYER':N_LAYER, 'BIDIRECTIONAL':BIDIRECTIONAL,
-'NUM_EPOCH':NUM_EPOCH, 'LEARNING_RATE':LEARNING_RATE, 'BATCH_LENGTH': BATCH_LENGTH, 'PAD_IDX':PAD_IDX}
+            'DROPOUT_RATE':DROPOUT_RATE, 'NUM_EPOCH':NUM_EPOCH, 
+            'LEARNING_RATE':LEARNING_RATE, 'BATCH_LENGTH': BATCH_LENGTH, 'PAD_IDX':PAD_IDX}
 
 DATA_PATH = 'data'
 SAVE_PATH = 'models'
@@ -431,7 +446,8 @@ def main():
                           hidden_dim = HIDDEN_DIM, 
                           output_dim = output_dim, 
                           n_layers = N_LAYER,
-                          bidirectional = BIDIRECTIONAL)
+                          bidirectional = BIDIRECTIONAL,
+                          dropout_rate = DROPOUT_RATE)
 
     print(lstm)
 
@@ -452,7 +468,7 @@ def main():
         os.makedirs(SAVE_PATH)
 
     ts = "%d"%(time.time())
-    params = '{}_HS_{}_EP_{}_LR_{}_BIDIR_{}'.format(SAVE_PREFIX, HIDDEN_DIM, NUM_EPOCH, LEARNING_RATE, int(BIDIRECTIONAL))
+    params = '{}_HS_{}_EP_{}_LR_{}_NLAYER_{}_BIDIR_{}_DROPOUT_{}'.format(SAVE_PREFIX, HIDDEN_DIM, NUM_EPOCH, LEARNING_RATE, N_LAYER, int(BIDIRECTIONAL), DROPOUT_RATE)
     sub_path = os.path.join(SAVE_PATH,params)
     if not os.path.exists(sub_path):
         os.makedirs(sub_path)
