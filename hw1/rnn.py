@@ -1,8 +1,4 @@
-
 # coding: utf-8
-
-# In[1]:
-
 
 import numpy as np
 import torch
@@ -10,9 +6,6 @@ import torch.nn as nn
 from torch import optim
 from torch.autograd import Variable
 import torch.nn.functional as F
-
-# In[30]:
-
 
 #from tqdm import tqdm 
 from collections import defaultdict
@@ -24,8 +17,7 @@ import pickle
 import os
 import json
 
-# In[4]:
-
+from models import LSTMRecognizer
 
 def read_ark(file_name):
     data = {}
@@ -83,6 +75,18 @@ def make_training_data(data, labels, label_to_idx):
 #     all_sent = set(k[0] for k in data.keys())
     sort_keys = sorted(data.keys(), key = lambda x: (x[0], x[1], int(x[2])))
 #     print(sort_keys[:100])
+    
+    #compute mean and std
+    M = len(list(data.values())[0]['features'])
+    N = len(data)
+    all_features = np.zeros((N,M))
+    for i, info in enumerate(data.values()):
+        digit_features = map(float, info['features'])
+        info['features'] = np.array(list(digit_features))  
+        all_features[i,] = info['features']
+
+    mean = np.mean(all_features, axis= 0)
+    std = np.std(all_features, axis= 0)
 
     fsequences = defaultdict(list)
     lsequences = defaultdict(list)
@@ -92,23 +96,22 @@ def make_training_data(data, labels, label_to_idx):
         sent_id = iid[1]
 
         info = data[iid]
-        features = list(map(float, info['features']))
-#         features = info['features']
-        if info['gender'] == 'f':
-            features.append(0)
-        else:
-            features.append(1)
+
+        #scale
+        features = (info['features'] - mean)/std
+
+        # if info['gender'] == 'f':
+        #     features.append(0)
+        # else:
+        #     features.append(1)
     
         fsequences[(speaker_id, sent_id)].append(features)
         l = label_to_idx[labels[iid]]
         lsequences[(speaker_id, sent_id)].append(l)
                 
-    return fsequences, lsequences
+    return {'fsequences':fsequences, 'lsequences':lsequences,
+            'features_mean':mean, 'features_std':std}
     
-# make_training_data(data, labels)
-
-
-# In[20]:
 
 
 def get_variable_from_seq(seq, seq_type, max_length=None):
@@ -182,10 +185,8 @@ def batchify(fsequences, lsequences, shuffle=True):
 #         print(lbatch.size())
     return processed_batches
 
-
-# In[10]:
-
-
+def scale():
+    pass
 def asMinutes(s):
     m = math.floor(s / 60)
     s -= m * 60
@@ -197,63 +198,6 @@ def timeSince(since, percent):
     es = s / (percent)
     rs = es - s
     return '%s (- %s)' % (asMinutes(s), asMinutes(rs))
-
-
-# In[11]:
-
-
-class LSTMRecognizer(nn.Module):
-
-    def __init__(self, input_dim, hidden_dim, output_dim, n_layers=1, bidirectional = False, dropout_rate=0):
-        super(LSTMRecognizer, self).__init__()
-        self.input_dim = input_dim
-        self.hidden_dim = hidden_dim
-        self.n_layers = n_layers
-        self.direction = 2 if bidirectional else 1
-
-        self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers=n_layers, bidirectional=bidirectional, dropout = dropout_rate)
-
-        # The linear layer that maps from hidden state space to tag space
-        self.h2h = nn.Linear(hidden_dim*self.direction, hidden_dim)
-        self.h_dropout = nn.Dropout(p= dropout_rate)
-        self.hidden2frame = nn.Linear(hidden_dim, output_dim)
-        self.LogSoftmax = nn.LogSoftmax()
-
-    #@staticmethod
-    def initHidden(self, n_sample):
-        result = Variable(torch.zeros(self.n_layers * self.direction, n_sample, self.hidden_dim))
-        if USE_CUDA:
-            return result.cuda(GPUID)
-        else:
-            return result
-
-    
-    def forward(self, input_, hidden=None, cell=None):
-        if hidden is None:
-            hidden = self.initHidden(input_.size()[1])
-        if cell is None:
-            cell = self.initHidden(input_.size()[1])
-        
-        seq_len = input_.size()[0]
-        n_sample = input_.size()[1]
-
-        # import pdb; pdb.set_trace()
-        output = input_
-        # for _ in range(self.n_layers):
-        output, (hidden, cell) = self.lstm(output, (hidden, cell))
-        output = F.relu(output)
-        
-        results = []
-        for i in range(seq_len):
-            h_output = self.h2h(output[i,:,:])
-            h_output = F.relu(h_output)
-            h_output = self.h_dropout(h_output)
-            dist = self.LogSoftmax(self.hidden2frame(h_output))  
-            results.append(dist)
-        return results 
-
-
-# In[45]:
 
 
 def train(input_variable, target_variable, lstm, optimizer, criterion):
@@ -368,8 +312,9 @@ def trainEpochs(lstm, fsequences, lsequences, learning_rate, n_epochs, print_eve
 
 USE_CUDA = torch.cuda.is_available()
 GPUID = 0
+FEATURE = 'fbank'
 HIDDEN_DIM = 256
-N_LAYER = 2
+N_LAYER = 3
 BIDIRECTIONAL = True
 DROPOUT_RATE = 0.4
 BUCKETS = [10, 50, 100, 150, 200, 250 ,300, 350, 400, 450, 500, 550, 600, 650, 750, 800 ]
@@ -377,15 +322,15 @@ BATCH_LENGTH  = 100
 PAD_TOKEN = 'PAD'
 PAD_IDX = 0
 
-SAVE_PREFIX = 'dropout'
+SAVE_PREFIX = 'scale_L3_drop40'
 NUM_EPOCH = 1500
 PRINT_EVERY = 5
 TEST_EVERY = 10
 SAVE_EVERY = 20
 LEARNING_RATE = 0.01
 TESTING_NUM = 100
-PARAMS = {'GPUID':GPUID, 'HIDDEN_DIM':HIDDEN_DIM, 'N_LAYER':N_LAYER, 'BIDIRECTIONAL':BIDIRECTIONAL,
-            'DROPOUT_RATE':DROPOUT_RATE, 'NUM_EPOCH':NUM_EPOCH, 
+PARAMS = {'GPUID':GPUID, 'FEATURE':FEATURE, 'HIDDEN_DIM':HIDDEN_DIM, 'N_LAYER':N_LAYER, 
+        'BIDIRECTIONAL':BIDIRECTIONAL, 'DROPOUT_RATE':DROPOUT_RATE, 'NUM_EPOCH':NUM_EPOCH, 
             'LEARNING_RATE':LEARNING_RATE, 'BATCH_LENGTH': BATCH_LENGTH, 'PAD_IDX':PAD_IDX}
 
 DATA_PATH = 'data'
@@ -397,7 +342,11 @@ SAVE_PATH = 'models'
 
 def main():
 
-    data = read_ark('data/fbank/train.ark')
+    if FEATURE == 'fbank':
+        data = read_ark('data/fbank/train.ark')
+    elif FEATURE == 'mfcc':
+        data = read_ark('data/mfcc/train.ark')
+
     labels = read_label_data('data/train.lab')
 
     idx_to_label = [PAD_TOKEN]
@@ -414,8 +363,11 @@ def main():
     print(idx_to_label)
     print(label_to_idx)
 
-    fsequences, lsequences = make_training_data(data, labels, label_to_idx)
+    tdata = make_training_data(data, labels, label_to_idx)
+    fsequences, lsequences = tdata['fsequences'] ,tdata['lsequences']
+    features_mean, features_std = tdata['features_mean'], tdata['features_std']
     print('number of sentence: {}'.format(len(fsequences)))
+    print(list(fsequences.values())[0][0])
 
     seq_len = list(map(len, fsequences.values()))
     # print(set(seq_len))
@@ -475,7 +427,7 @@ def main():
     else:
         sub_path = sub_path+ '_' + ts
         os.makedirs(sub_path)
-    pickle.dump(idx_to_label, open(os.path.join(sub_path,'labels.pkl'), 'wb'))
+    pickle.dump((idx_to_label, features_mean, features_std), open(os.path.join(sub_path,'training_meta.pkl'), 'wb'))
     json.dump(PARAMS, open(os.path.join(sub_path, 'params.json'),'w'))
 
     # main training process

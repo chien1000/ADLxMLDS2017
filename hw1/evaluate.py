@@ -9,9 +9,12 @@ import json
 from collections import defaultdict
 import time
 
-from rnn import LSTMRecognizer, read_ark, get_variable_from_seq, batchify
+import numpy as np
+from rnn import read_ark, get_variable_from_seq
+from models import LSTMRecognizer
 
-def make_sequences(data):
+
+def make_sequences(data, features_mean, features_std):
 #     all_sent = set(k[0] for k in data.keys())
     sort_keys = sorted(data.keys(), key = lambda x: (x[0], x[1], int(x[2])))
 #     print(sort_keys[:100])
@@ -23,12 +26,13 @@ def make_sequences(data):
         sent_id = iid[1]
 
         info = data[iid]
-        features = list(map(float, info['features']))
-#         features = info['features']
-        if info['gender'] == 'f':
-            features.append(0)
-        else:
-            features.append(1)
+        features = np.array(list(map(float, info['features'])))
+        features = (features - features_mean)/features_std
+
+        # if info['gender'] == 'f':
+        #     features.append(0)
+        # else:
+        #     features.append(1)
     
         fsequences[(speaker_id, sent_id)].append(features)
                 
@@ -151,13 +155,14 @@ def write_outputs(lines):
 
 def main(model_dir, data_dir, output_fname):
 
-    ldict_path = os.path.join(model_dir,'labels.pkl')
+    trainging_meta_path = os.path.join(model_dir,'training_meta.pkl')
     model_path = os.path.join(model_dir, 'model.bin')
     params_path = os.path.join(model_dir, 'params.json')
 
-    ldict = pickle.load(open(ldict_path,'rb'))
-    idx_to_label = ldict
-
+    tmeta = pickle.load(open(trainging_meta_path,'rb'))
+    idx_to_label, features_mean, features_std = tmeta[0], tmeta[1], tmeta[2]
+    
+    
     params = json.load(open(params_path,'r'))
 
     model = LSTMRecognizer(input_dim = params['input_dim'], 
@@ -168,14 +173,17 @@ def main(model_dir, data_dir, output_fname):
                               dropout_rate = params['DROPOUT_RATE'])
     model.load_state_dict(torch.load(model_path, map_location={'cuda:0': 'cpu','cuda:1':'cpu','cuda:2':'cpu','cuda:3':'cpu'}))
 
+    if params['FEATURE'] == 'fbank':
+        test = read_ark(os.path.join(data_dir, 'fbank/test.ark'))
+    elif params['FEATURE'] == 'mfcc':
+        test = read_ark(os.path.join(data_dir, 'mfcc/test.ark'))
 
-    test = read_ark(os.path.join(data_dir, 'fbank/test.ark'))
     for k in test:
         print(k)
         print(test[k])
         break
 
-    fsequences = make_sequences(test)
+    fsequences = make_sequences(test,features_mean, features_std)
 
     map48_to39_path = os.path.join(data_dir, 'phones/48_39.map')
     map_phone_to_char_path = os.path.join(data_dir, '48phone_char.map')
