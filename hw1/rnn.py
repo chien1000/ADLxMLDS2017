@@ -17,7 +17,7 @@ import pickle
 import os
 import json
 
-from models import LSTMRecognizer
+from models import LSTMRecognizer, CNN_LSTMRecognizer
 
 def read_ark(file_name):
     data = {}
@@ -313,16 +313,24 @@ def trainEpochs(lstm, fsequences, lsequences, learning_rate, n_epochs, print_eve
 USE_CUDA = torch.cuda.is_available()
 GPUID = 0
 FEATURE = 'fbank'
-HIDDEN_DIM = 256
-N_LAYER = 3
+NETWORK = 'CRNN' #RNN
+HIDDEN_DIM = 128
+N_LAYER = 1
 BIDIRECTIONAL = True
-DROPOUT_RATE = 0.4
+DROPOUT_RATE = 0.2
+CHANNELS = 80
+KERNEL_SIZE = 8
+STRIDE = 2
+POOLING_SIZE = 6
+CNN_PADDING = 0
+DILATION = 1
+
 BUCKETS = [10, 50, 100, 150, 200, 250 ,300, 350, 400, 450, 500, 550, 600, 650, 750, 800 ]
 BATCH_LENGTH  = 100
 PAD_TOKEN = 'PAD'
 PAD_IDX = 0
 
-SAVE_PREFIX = 'scale_L3_drop40'
+SAVE_PREFIX = 'cnn'
 NUM_EPOCH = 1500
 PRINT_EVERY = 5
 TEST_EVERY = 10
@@ -330,7 +338,9 @@ SAVE_EVERY = 20
 LEARNING_RATE = 0.01
 TESTING_NUM = 100
 PARAMS = {'GPUID':GPUID, 'FEATURE':FEATURE, 'HIDDEN_DIM':HIDDEN_DIM, 'N_LAYER':N_LAYER, 
-        'BIDIRECTIONAL':BIDIRECTIONAL, 'DROPOUT_RATE':DROPOUT_RATE, 'NUM_EPOCH':NUM_EPOCH, 
+        'BIDIRECTIONAL':BIDIRECTIONAL, 'DROPOUT_RATE':DROPOUT_RATE, 'CHANNELS':CHANNELS,
+        'KERNEL_SIZE':KERNEL_SIZE, 'STRIDE':STRIDE, 'POOLING_SIZE':POOLING_SIZE,
+        'CNN_PADDING':CNN_PADDING, 'DILATION':DILATION, 'NUM_EPOCH':NUM_EPOCH, 
             'LEARNING_RATE':LEARNING_RATE, 'BATCH_LENGTH': BATCH_LENGTH, 'PAD_IDX':PAD_IDX}
 
 DATA_PATH = 'data'
@@ -394,12 +404,26 @@ def main():
     PARAMS['input_dim'] = input_dim
     PARAMS['output_dim'] = output_dim
     
-    lstm = LSTMRecognizer(input_dim = input_dim, 
-                          hidden_dim = HIDDEN_DIM, 
-                          output_dim = output_dim, 
-                          n_layers = N_LAYER,
-                          bidirectional = BIDIRECTIONAL,
-                          dropout_rate = DROPOUT_RATE)
+    if NETWORK == 'RNN':
+        lstm = LSTMRecognizer(input_dim = input_dim, 
+                              hidden_dim = HIDDEN_DIM, 
+                              output_dim = output_dim, 
+                              n_layers = N_LAYER,
+                              bidirectional = BIDIRECTIONAL,
+                              dropout_rate = DROPOUT_RATE)
+    elif NETWORK == 'CRNN':
+        lstm = CNN_LSTMRecognizer(input_dim = input_dim,
+                                                        output_dim = output_dim,
+                                                        hidden_dim = HIDDEN_DIM,
+                                                        lstm_n_layers= N_LAYER, 
+                                                        bidirectional = BIDIRECTIONAL, 
+                                                        dropout_rate = DROPOUT_RATE, 
+                                                        out_channels = CHANNELS, 
+                                                        kernel_size = KERNEL_SIZE, 
+                                                        stride = STRIDE, 
+                                                        pooling_size = POOLING_SIZE, 
+                                                        padding = CNN_PADDING, 
+                                                        dilation = DILATION)
 
     print(lstm)
 
