@@ -47,9 +47,14 @@ def read_ark(file_name):
     
     return data
 
-
-# In[5]:
-
+def combine_data(data1, data2):
+    data_all = {}
+    for iid in data1:
+        instance1 = data1[iid]
+        instance2 = data2[iid]
+        instance1['features'].extend(instance2['features'])
+        data_all[iid] = instance1
+    return data_all
 
 def read_label_data(file_name):
     labels = {}
@@ -312,32 +317,32 @@ def trainEpochs(lstm, fsequences, lsequences, learning_rate, n_epochs, print_eve
 
 USE_CUDA = torch.cuda.is_available()
 GPUID = 0
-FEATURE = 'fbank'
+FEATURE = 'both' #fbank mfcc both
 NETWORK = 'CRNN' #RNN
 HIDDEN_DIM = 128
-N_LAYER = 1
+N_LAYER = 2
 BIDIRECTIONAL = True
 DROPOUT_RATE = 0.2
-CHANNELS = 80
-KERNEL_SIZE = 8
-STRIDE = 2
-POOLING_SIZE = 6
+CHANNELS = 30
+KERNEL_SIZE = 5
+STRIDE = 1
+POOLING_SIZE = 2
 CNN_PADDING = 0
 DILATION = 1
 
 BUCKETS = [10, 50, 100, 150, 200, 250 ,300, 350, 400, 450, 500, 550, 600, 650, 750, 800 ]
-BATCH_LENGTH  = 100
+BATCH_LENGTH  = 40
 PAD_TOKEN = 'PAD'
 PAD_IDX = 0
 
-SAVE_PREFIX = 'cnn'
-NUM_EPOCH = 1500
+SAVE_PREFIX = 'cnn_2L_120filter'
+NUM_EPOCH = 1000
 PRINT_EVERY = 5
 TEST_EVERY = 10
 SAVE_EVERY = 20
 LEARNING_RATE = 0.01
 TESTING_NUM = 100
-PARAMS = {'GPUID':GPUID, 'FEATURE':FEATURE, 'HIDDEN_DIM':HIDDEN_DIM, 'N_LAYER':N_LAYER, 
+PARAMS = {'GPUID':GPUID, 'FEATURE':FEATURE,'NETWORK':NETWORK,'HIDDEN_DIM':HIDDEN_DIM, 'N_LAYER':N_LAYER, 
         'BIDIRECTIONAL':BIDIRECTIONAL, 'DROPOUT_RATE':DROPOUT_RATE, 'CHANNELS':CHANNELS,
         'KERNEL_SIZE':KERNEL_SIZE, 'STRIDE':STRIDE, 'POOLING_SIZE':POOLING_SIZE,
         'CNN_PADDING':CNN_PADDING, 'DILATION':DILATION, 'NUM_EPOCH':NUM_EPOCH, 
@@ -356,7 +361,11 @@ def main():
         data = read_ark('data/fbank/train.ark')
     elif FEATURE == 'mfcc':
         data = read_ark('data/mfcc/train.ark')
-
+    elif FEATURE == 'both':
+        data1 = read_ark('data/fbank/train.ark')
+        data2 = read_ark('data/mfcc/train.ark')
+        data = combine_data(data1, data2)
+        
     labels = read_label_data('data/train.lab')
 
     idx_to_label = [PAD_TOKEN]
