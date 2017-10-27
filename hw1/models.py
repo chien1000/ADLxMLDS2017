@@ -81,6 +81,7 @@ class CNN_LSTMRecognizer(nn.Module):
         self.max_pool = nn.MaxPool1d(pooling_size, stride=stride)
         self.after_conv_dim = floor((input_dim+2*padding-dilation*(kernel_size-1)-1)/stride+1)
         self.after_pool_dim = floor((self.after_conv_dim+2*padding-dilation*(pooling_size-1)-1)/stride+1)
+        self.c_dropout = nn.Dropout(p=dropout_rate)
         # self.conv2lstm = nn.Linear()
 
         #lstm params
@@ -118,7 +119,8 @@ class CNN_LSTMRecognizer(nn.Module):
             single = self.conv(single.unsqueeze(1)) 
             single = F.relu(single)
             single = self.max_pool(single)
-
+            single = self.c_dropout(single)
+            
             #resize
             dim_len = single.size()[1] * single.size()[2]
             single = single.view(n_sample, dim_len).unsqueeze(0)
