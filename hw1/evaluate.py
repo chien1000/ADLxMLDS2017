@@ -11,7 +11,7 @@ import time
 
 import numpy as np
 from rnn import read_ark, get_variable_from_seq
-from models import LSTMRecognizer
+from models import LSTMRecognizer, CNN_LSTMRecognizer
 
 
 def make_sequences(data, features_mean, features_std):
@@ -164,13 +164,27 @@ def main(model_dir, data_dir, output_fname):
     
     
     params = json.load(open(params_path,'r'))
+    if params['NETWORK'] == 'RNN':
+        model = LSTMRecognizer(input_dim = params['input_dim'], 
+                                  hidden_dim = params['HIDDEN_DIM'], 
+                                  output_dim = params['output_dim'], 
+                                  n_layers = params['N_LAYER'],
+                                  bidirectional = params['BIDIRECTIONAL'],
+                                  dropout_rate = params['DROPOUT_RATE'])
+    elif params['NETWORK'] == 'CRNN':
+        model = CNN_LSTMRecognizer(input_dim = params['input_dim'],
+                                    output_dim = params['output_dim'],
+                                    hidden_dim = params['HIDDEN_DIM'],
+                                    lstm_n_layers= params['N_LAYER'], 
+                                    bidirectional = params['BIDIRECTIONAL'], 
+                                    dropout_rate = params['DROPOUT_RATE'], 
+                                    out_channels = params['CHANNELS'], 
+                                    kernel_size = params['KERNEL_SIZE'], 
+                                    stride = params['STRIDE'], 
+                                    pooling_size = params['POOLING_SIZE'], 
+                                    padding = params['CNN_PADDING'], 
+                                    dilation = params['DILATION'])
 
-    model = LSTMRecognizer(input_dim = params['input_dim'], 
-                              hidden_dim = params['HIDDEN_DIM'], 
-                              output_dim = params['output_dim'], 
-                              n_layers = params['N_LAYER'],
-                              bidirectional = params['BIDIRECTIONAL'],
-                              dropout_rate = params['DROPOUT_RATE'])
     model.load_state_dict(torch.load(model_path, map_location={'cuda:0': 'cpu','cuda:1':'cpu','cuda:2':'cpu','cuda:3':'cpu'}))
 
     if params['FEATURE'] == 'fbank':
