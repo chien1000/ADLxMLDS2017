@@ -192,9 +192,9 @@ def main(model_dir, data_dir, output_fname):
     elif params['FEATURE'] == 'mfcc':
         test = read_ark(os.path.join(data_dir, 'mfcc/test.ark'))
     elif params['FEATURE'] == 'both':
-        data1 = read_ark('data/fbank/train.ark')
-        data2 = read_ark('data/mfcc/train.ark')
-        data = combine_data(data1, data2)
+        data1 = read_ark('data/fbank/test.ark')
+        data2 = read_ark('data/mfcc/test.ark')
+        test = combine_data(data1, data2)
         
     for k in test:
         print(k)
