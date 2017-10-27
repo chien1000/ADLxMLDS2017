@@ -147,7 +147,32 @@ def pad_seq(sequence, max_length, seq_type):
 
     return new_seq
 
+def shuffle_batches(batches):
+    new_batches = []
+    collect = defaultdict(list)
+    for batch_pair in batches:
+        seq_len = batch_pair[0].size()[0]
+        collect[seq_len].append(batch_pair)
+
+    for batch_lst in collect.values():
+        # import pdb;pdb.set_trace()
+        fbatch_all = [batch_pair[0] for batch_pair in batch_lst]
+        lbatch_all = [batch_pair[1] for batch_pair in batch_lst]
+        fbatch_all = torch.cat(fbatch_all,1)
+        lbatch_all = torch.cat(lbatch_all,1)
+
+        n_samples = fbatch_all.size()[1]
+
+        fbatch_all = fbatch_all[:,torch.randperm(n_samples),:]
+        lbatch_all = lbatch_all[:,torch.randperm(n_samples)]
+
+        for pair in zip(fbatch_all.split(BATCH_LENGTH,1), lbatch_all.split(BATCH_LENGTH,1)):
+            new_batches.append(pair)
+
+    return new_batches
+
 def batchify(fsequences, lsequences, shuffle=True):
+
     print('Creating batches')
     batches = defaultdict(list)
     processed_batches = []
@@ -172,7 +197,7 @@ def batchify(fsequences, lsequences, shuffle=True):
         fseq_var = get_variable_from_seq(fseq, 'f', use_bucket)
         lseq_var = get_variable_from_seq(lseq, 'l', use_bucket)
 
-        batches[use_bucket].append((fseq_var, lseq_var))
+        batches[use_bucket].append((fseq_var, lseq_var))  
 
     for batch in batches.values():
 #         print(len(batch))
@@ -181,7 +206,7 @@ def batchify(fsequences, lsequences, shuffle=True):
         fbatch = torch.cat(fbatch, 1) #seq, batch, feature_dim
         lbatch = torch.cat(lbatch, 1)
 
-        for pair in zip(fbatch.split(BATCH_LENGTH), lbatch.split(BATCH_LENGTH)):
+        for pair in zip(fbatch.split(BATCH_LENGTH,1), lbatch.split(BATCH_LENGTH,1)):
             processed_batches.append(pair)
 
     #     torch.transpose(fbatch, 0, 1)
@@ -240,10 +265,12 @@ def trainEpochs(lstm, fsequences, lsequences, learning_rate, n_epochs, print_eve
     print('total number of batch: %d'%(n_batches))
   
     for epoch in range(1, n_epochs+1):
+        print('epoch:{}/{}'.format(epoch, n_epochs))
+
         # set model for training
         lstm.train()
 
-        print('epoch:{}/{}'.format(epoch, n_epochs))
+        # batches = shuffle_batches(batches)
         b = 1
         for fbatch, lbatch in batches:
             # print('[%d/%d]'%(b,n_batches),end='\r')
@@ -277,7 +304,6 @@ def trainEpochs(lstm, fsequences, lsequences, learning_rate, n_epochs, print_eve
             if test_pairs:
                 lstm.eval()
                 max_len = max(list(map(len,  [pair[1] for pair in test_pairs])))
-                print(max_len)
 
                 features = [get_variable_from_seq(pair[0], 'f', max_len) for pair in test_pairs]
                 labels = [get_variable_from_seq(pair[1], 'l', max_len) for pair in test_pairs]
@@ -317,13 +343,13 @@ def trainEpochs(lstm, fsequences, lsequences, learning_rate, n_epochs, print_eve
 
 USE_CUDA = torch.cuda.is_available()
 GPUID = 0
-FEATURE = 'both' #fbank mfcc both
-NETWORK = 'CRNN' #RNN
-HIDDEN_DIM = 128
-N_LAYER = 2
+FEATURE = 'fbank' #fbank mfcc both
+NETWORK = 'RNN' #CRNN RNN
+HIDDEN_DIM = 256
+N_LAYER = 3
 BIDIRECTIONAL = True
-DROPOUT_RATE = 0.2
-CHANNELS = 30
+DROPOUT_RATE = 0.4
+CHANNELS = 6
 KERNEL_SIZE = 5
 STRIDE = 1
 POOLING_SIZE = 2
@@ -331,17 +357,17 @@ CNN_PADDING = 0
 DILATION = 1
 
 BUCKETS = [10, 50, 100, 150, 200, 250 ,300, 350, 400, 450, 500, 550, 600, 650, 750, 800 ]
-BATCH_LENGTH  = 40
+BATCH_LENGTH  = 80
 PAD_TOKEN = 'PAD'
 PAD_IDX = 0
 
-SAVE_PREFIX = 'cnn_2L_120filter'
+SAVE_PREFIX = 'fbank_new_RNN'#'shuffle_drop40_cnn_both'
 NUM_EPOCH = 1000
 PRINT_EVERY = 5
 TEST_EVERY = 10
 SAVE_EVERY = 20
 LEARNING_RATE = 0.01
-TESTING_NUM = 100
+TESTING_NUM = 50
 PARAMS = {'GPUID':GPUID, 'FEATURE':FEATURE,'NETWORK':NETWORK,'HIDDEN_DIM':HIDDEN_DIM, 'N_LAYER':N_LAYER, 
         'BIDIRECTIONAL':BIDIRECTIONAL, 'DROPOUT_RATE':DROPOUT_RATE, 'CHANNELS':CHANNELS,
         'KERNEL_SIZE':KERNEL_SIZE, 'STRIDE':STRIDE, 'POOLING_SIZE':POOLING_SIZE,
