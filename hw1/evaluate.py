@@ -99,7 +99,7 @@ def map_phone_to_char(map_path, phone_seq):
     new_seq = [mapping[p] for p in phone_seq]
     return new_seq
 
-def make_prediction(model, fsequences, idx_to_label, map48_to39_path, map_phone_to_char_path):
+def make_prediction(model, fsequences, idx_to_label, pad_idx, map48_to39_path, map_phone_to_char_path):
     predict_lines = []
     use_cuda = torch.cuda.is_available()
     if use_cuda:
@@ -120,15 +120,21 @@ def make_prediction(model, fsequences, idx_to_label, map48_to39_path, map_phone_
             predicts.append(topi[0,0])
 #         print(predicts)
 
-        labels = [idx_to_label[pidx] for pidx in predicts]
-#         print(labels)
-        try:
-            labels.remove('SOS')
-            labels.remove('EOS')
-            labels.remove('PAD')
 
+        try:
+            predicts.remove(pad_idx)
         except Exception as e:
             pass
+            
+        labels = [idx_to_label[pidx] for pidx in predicts]
+#         print(labels)
+        # try:
+        #     labels.remove('SOS')
+        #     labels.remove('EOS')
+        #     labels.remove('PAD')
+
+        # except Exception as e:
+        #     pass
         
         labels = map48_to39(map48_to39_path, labels)
 #         print(labels)
@@ -177,8 +183,9 @@ def main(model_dir, data_dir, output_fname):
                                     hidden_dim = params['HIDDEN_DIM'],
                                     lstm_n_layers= params['N_LAYER'], 
                                     bidirectional = params['BIDIRECTIONAL'], 
-                                    dropout_rate = params['DROPOUT_RATE'], 
-                                    out_channels = params['CHANNELS'], 
+                                    dropout_rate = params['DROPOUT_RATE'],
+                                    in_channels = params['IN_CHANNELS'] ,
+                                    out_channels = params['OUT_CHANNELS'], 
                                     kernel_size = params['KERNEL_SIZE'], 
                                     stride = params['STRIDE'], 
                                     pooling_size = params['POOLING_SIZE'], 
@@ -206,7 +213,7 @@ def main(model_dir, data_dir, output_fname):
     map48_to39_path = os.path.join(data_dir, 'phones/48_39.map')
     map_phone_to_char_path = os.path.join(data_dir, '48phone_char.map')
 
-    predict_lines = make_prediction(model, fsequences, idx_to_label, map48_to39_path, map_phone_to_char_path)
+    predict_lines = make_prediction(model, fsequences, idx_to_label, params['PAD_IDX'], map48_to39_path, map_phone_to_char_path)
     
     with open( output_fname, 'w') as fout:
         fout.write('id,phone_sequence\n')

@@ -61,7 +61,7 @@ class LSTMRecognizer(nn.Module):
 
 class CNN_LSTMRecognizer(nn.Module):
     def __init__(self,  input_dim,  output_dim,  hidden_dim, lstm_n_layers=1, bidirectional = False, dropout_rate=0, 
-                    out_channels=6, kernel_size=6, stride=1, pooling_size=2, padding=0, dilation=1,):
+                    in_channels=1, out_channels=6, kernel_size=6, stride=1, pooling_size=2, padding=0, dilation=1,):
 
         super(CNN_LSTMRecognizer, self).__init__()
 
@@ -70,13 +70,14 @@ class CNN_LSTMRecognizer(nn.Module):
         self.hidden_dim = hidden_dim
 
         #cnn params
+        self.in_channels = in_channels
         self.out_channels = out_channels
         self.kernel_size = kernel_size
         self.stride = stride
         self.pooling_size = pooling_size
         self.padding = padding
         self.dilation = dilation
-        self.conv = nn.Conv1d(in_channels=1, out_channels= out_channels, kernel_size=kernel_size, 
+        self.conv = nn.Conv1d(in_channels=in_channels, out_channels= out_channels, kernel_size=kernel_size, 
                                                 stride= stride, padding=padding, dilation=dilation)
         self.max_pool = nn.MaxPool1d(pooling_size, stride=stride)
         self.after_conv_dim = floor((input_dim+2*padding-dilation*(kernel_size-1)-1)/stride+1)
@@ -111,20 +112,36 @@ class CNN_LSTMRecognizer(nn.Module):
 
         seq_len = input_.size()[0]
         n_sample = input_.size()[1]
+        n_dim = input_.size()[2]
 
         input_conved = []
-        for i in range(seq_len):
-            single = input_[i,:,:] 
+        
+        context_len = int((self.in_channels-1)/2)
+        #padding
+        if context_len>0:
+            zero_var = Variable(torch.zeros(context_len, n_sample, n_dim).float())
+            if USE_CUDA:
+                zero_var = zero_var.cuda(GPUID)
+            input_pad = [zero_var, input_, zero_var]
+            # import pdb;pdb.set_trace()
+            input_pad = torch.cat(input_pad,0)
+        else:
+            input_pad = input_
+
+        for i in range(context_len+0, seq_len+context_len):
+            single = input_pad[i-context_len:i+context_len+1,:,:] 
             #input of conv layer must be Input: (N,C,L)
-            single = self.conv(single.unsqueeze(1)) 
+            # single = self.conv(single.unsqueeze(1)) 
+            single = torch.transpose(single, 0, 1)
+            single = self.conv(single) 
             single = F.relu(single)
             single = self.max_pool(single)
-            single = self.c_dropout(single)
             
             #resize
             dim_len = single.size()[1] * single.size()[2]
             single = single.view(n_sample, dim_len).unsqueeze(0)
 
+            single = self.c_dropout(single)
             input_conved.append(single)
         # import pdb;pdb.set_trace()
         input_conved = torch.cat(input_conved, 0)
@@ -143,5 +160,3 @@ class CNN_LSTMRecognizer(nn.Module):
             results.append(dist)
         return results 
 
-#TODO:
-#CNN+dropout

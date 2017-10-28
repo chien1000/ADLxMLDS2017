@@ -270,7 +270,7 @@ def trainEpochs(lstm, fsequences, lsequences, learning_rate, n_epochs, print_eve
         # set model for training
         lstm.train()
 
-        # batches = shuffle_batches(batches)
+        batches = shuffle_batches(batches)
         b = 1
         for fbatch, lbatch in batches:
             # print('[%d/%d]'%(b,n_batches),end='\r')
@@ -344,12 +344,13 @@ def trainEpochs(lstm, fsequences, lsequences, learning_rate, n_epochs, print_eve
 USE_CUDA = torch.cuda.is_available()
 GPUID = 0
 FEATURE = 'fbank' #fbank mfcc both
-NETWORK = 'RNN' #CRNN RNN
+NETWORK = 'CRNN' #CRNN RNN
 HIDDEN_DIM = 256
 N_LAYER = 3
 BIDIRECTIONAL = True
 DROPOUT_RATE = 0.4
-CHANNELS = 6
+IN_CHANNELS = 3
+OUT_CHANNELS = 6
 KERNEL_SIZE = 5
 STRIDE = 1
 POOLING_SIZE = 2
@@ -357,11 +358,11 @@ CNN_PADDING = 0
 DILATION = 1
 
 BUCKETS = [10, 50, 100, 150, 200, 250 ,300, 350, 400, 450, 500, 550, 600, 650, 750, 800 ]
-BATCH_LENGTH  = 80
+BATCH_LENGTH  = 60
 PAD_TOKEN = 'PAD'
 PAD_IDX = 0
 
-SAVE_PREFIX = 'fbank_new_RNN'#'shuffle_drop40_cnn_both'
+SAVE_PREFIX = 'shuffle_context_fbank_new_CNN_'#'shuffle_drop40_cnn_both'
 NUM_EPOCH = 1000
 PRINT_EVERY = 5
 TEST_EVERY = 10
@@ -369,7 +370,7 @@ SAVE_EVERY = 20
 LEARNING_RATE = 0.01
 TESTING_NUM = 50
 PARAMS = {'GPUID':GPUID, 'FEATURE':FEATURE,'NETWORK':NETWORK,'HIDDEN_DIM':HIDDEN_DIM, 'N_LAYER':N_LAYER, 
-        'BIDIRECTIONAL':BIDIRECTIONAL, 'DROPOUT_RATE':DROPOUT_RATE, 'CHANNELS':CHANNELS,
+        'BIDIRECTIONAL':BIDIRECTIONAL, 'DROPOUT_RATE':DROPOUT_RATE, 'IN_CHANNELS':IN_CHANNELS, 'OUT_CHANNELS':OUT_CHANNELS,
         'KERNEL_SIZE':KERNEL_SIZE, 'STRIDE':STRIDE, 'POOLING_SIZE':POOLING_SIZE,
         'CNN_PADDING':CNN_PADDING, 'DILATION':DILATION, 'NUM_EPOCH':NUM_EPOCH, 
             'LEARNING_RATE':LEARNING_RATE, 'BATCH_LENGTH': BATCH_LENGTH, 'PAD_IDX':PAD_IDX}
@@ -453,7 +454,8 @@ def main():
                                                         lstm_n_layers= N_LAYER, 
                                                         bidirectional = BIDIRECTIONAL, 
                                                         dropout_rate = DROPOUT_RATE, 
-                                                        out_channels = CHANNELS, 
+                                                        in_channels = IN_CHANNELS,
+                                                        out_channels = OUT_CHANNELS, 
                                                         kernel_size = KERNEL_SIZE, 
                                                         stride = STRIDE, 
                                                         pooling_size = POOLING_SIZE, 
@@ -479,7 +481,7 @@ def main():
         os.makedirs(SAVE_PATH)
 
     ts = "%d"%(time.time())
-    params = '{}_HS_{}_EP_{}_LR_{}_NLAYER_{}_BIDIR_{}_DROPOUT_{}'.format(SAVE_PREFIX, HIDDEN_DIM, NUM_EPOCH, LEARNING_RATE, N_LAYER, int(BIDIRECTIONAL), DROPOUT_RATE)
+    params = '{}_{}_HS_{}_EP_{}_LR_{}_NLAYER_{}_BIDIR_{}_DROPOUT_{}_INCH{}'.format(SAVE_PREFIX, NETWORK, HIDDEN_DIM, NUM_EPOCH, LEARNING_RATE, N_LAYER, int(BIDIRECTIONAL), DROPOUT_RATE, IN_CHANNELS)
     sub_path = os.path.join(SAVE_PATH,params)
     if not os.path.exists(sub_path):
         os.makedirs(sub_path)
