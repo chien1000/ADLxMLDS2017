@@ -1,3 +1,12 @@
+hw1/models/
+hw1/outputs/
+hw1/data/
+hw1/wav/
+
+hw2/models/
+hw2/outputs/
+hw2/data
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
