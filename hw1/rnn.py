@@ -270,7 +270,7 @@ def trainEpochs(lstm, fsequences, lsequences, learning_rate, n_epochs, print_eve
         # set model for training
         lstm.train()
 
-        batches = shuffle_batches(batches)
+        # batches = shuffle_batches(batches)
         b = 1
         for fbatch, lbatch in batches:
             # print('[%d/%d]'%(b,n_batches),end='\r')
@@ -344,7 +344,7 @@ def trainEpochs(lstm, fsequences, lsequences, learning_rate, n_epochs, print_eve
 USE_CUDA = torch.cuda.is_available()
 GPUID = 0
 FEATURE = 'fbank' #fbank mfcc both
-NETWORK = 'CRNN' #CRNN RNN
+NETWORK = 'RNN' #CRNN RNN
 HIDDEN_DIM = 256
 N_LAYER = 3
 BIDIRECTIONAL = True
@@ -362,7 +362,7 @@ BATCH_LENGTH  = 60
 PAD_TOKEN = 'PAD'
 PAD_IDX = 0
 
-SAVE_PREFIX = 'shuffle_context_fbank_new_CNN_'#'shuffle_drop40_cnn_both'
+SAVE_PREFIX = 'VRNN'#'shuffle_drop40_cnn_both'
 NUM_EPOCH = 1000
 PRINT_EVERY = 5
 TEST_EVERY = 10
@@ -393,7 +393,7 @@ def main():
         data2 = read_ark('data/mfcc/train.ark')
         data = combine_data(data1, data2)
         
-    labels = read_label_data('data/train.lab')
+    labels = read_label_data('data/label/train.lab')
 
     idx_to_label = [PAD_TOKEN]
     idx_to_label.extend(list(set(labels.values())))
@@ -514,60 +514,6 @@ def main():
 
     torch.save(lstm.state_dict(), open(os.path.join(sub_path, 'model.bin'), 'wb'))
     print('All of models are trained and saved to {}'.format(sub_path))
-
-
-# In[ ]:
-
-
-# def evaluate(lstm, , max_length, sentence_word, sentence_sense):
-#     input_variable_word = variableFromSentence(input_lang_word, sentence_word)
-#     input_variable_sense = variableFromSentence(input_lang_sense, sentence_sense)
-    
-#     input_variable = torch.cat((input_variable_word, input_variable_sense), 1)
-
-#     n_sample = input_variable.size()[0]
-#     input_length = input_variable.size()[1] // 2
-
-#     # encoder forward
-#     input_variable = input_variable.cuda(GPUID) if USE_CUDA else input_variable
-#     # encoder_hiddens, encoder_hidden, encoder_cell = encoder(input_variable)
-#     encoder_outputs, encoder_hidden_word, encoder_hidden_sense, encoder_cell_word, encoder_cell_sense = encoder(input_variable)
-    
-
-#     # prepare decoder input data which the fist input is the index of start of sentence
-#     decoder_input = Variable(torch.LongTensor([[SOS_TOKEN]]))  # SOS
-#     decoder_input = decoder_input.cuda(GPUID) if USE_CUDA else decoder_input
-#     decoder_hidden = encoder_outputs[:, -1, :].unsqueeze(0)
-#     #decoder_cell = encoder_cell
-#     decoder_cell = decoder.initHidden(n_sample) # get cell with zero value
-
-#     decoded_words = []
-#     decoder_attentions = torch.zeros(max_length, input_length)
-#     assert max_length > 0
-#     for di in range(max_length):
-#         decoder_output, decoder_hidden, decoder_cell, decoder_attention = decoder(
-#             decoder_input, decoder_hidden, decoder_cell, encoder_outputs)
-
-#         decoder_attentions[di] = decoder_attention.data
-#         topv, topi = decoder_output.data.topk(1)
-#         ni = topi[0][0]
-#         if ni == EOS_TOKEN:
-#             decoded_words.append('<EOS>')
-#             break
-#         else:
-#             decoded_words.append(output_lang.index2word[ni])
-
-#         decoder_input = Variable(torch.LongTensor([[ni]]))
-#         decoder_input = decoder_input.cuda(GPUID) if USE_CUDA else decoder_input
-
-#     return decoded_words, decoder_attentions[:di + 1]
-
-
-# print(fsequences[('faem0', 'si1392')][:10])
-# print(lsequences[('faem0', 'si1392')][:10])
-# print(fsequences[('faem0', 'si1392')][-10:])
-# print(lsequences[('faem0', 'si1392')][-10:])
-
 
 
 if __name__ == '__main__':
