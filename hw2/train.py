@@ -27,29 +27,32 @@ PAD_TOKEN = 'PAD'
 START_TOKEN = 'START'
 END_TOKEN = 'END'
 INPUT_MAX_LENGTH = 80
-TARGET_MAX_LENGTH = 40
+TARGET_MAX_LENGTH = 42
 
 HIDDEN_DIM = 256
 N_LAYER = 1
 BIDIRECTIONAL = False
-DROPOUT_RATE = 0
+DROPOUT_RATE = 0.2
 
+GPUID =0
 USE_CUDA = torch.cuda.is_available()
-BATCH_SIZE  = 128
-NUM_EPOCH = 10
-PRINT_EVERY = 1
-TEST_EVERY = 1
-SAVE_EVERY = 1
-LEARNING_RATE = 0.01
+BATCH_SIZE  = 256
+NUM_EPOCH = 10000
+PRINT_EVERY = 10
+TEST_EVERY = 10
+SAVE_EVERY = 50
+LEARNING_RATE = 0.001
+TEACHER_FORCE_RATIO = 0.5
 TESTING_NUM = 1
-SAVE_PREFIX = ''
+SAVE_PREFIX = 'drop20_adam_001'
 # DATA_PATH = 'data'
 SAVE_PATH = 'models'
 
 PARAMS = {'HIDDEN_DIM':HIDDEN_DIM, 'N_LAYER':N_LAYER, 
         'BIDIRECTIONAL':BIDIRECTIONAL, 'DROPOUT_RATE':DROPOUT_RATE,  
           'NUM_EPOCH':NUM_EPOCH,  'LEARNING_RATE':LEARNING_RATE, 
-          'BATCH_SIZE': BATCH_SIZE, 'PAD_IDX':PAD_IDX, 'START_IDX':START_IDX, 'END_IDX':END_IDX}
+          'BATCH_SIZE': BATCH_SIZE, 'PAD_IDX':PAD_IDX, 'START_IDX':START_IDX, 'END_IDX':END_IDX,
+          'INPUT_MAX_LENGTH': INPUT_MAX_LENGTH, 'TARGET_MAX_LENGTH':TARGET_MAX_LENGTH}
 
 def read_training_data(data_path):
     feat_path = join(data_path,'training_data/feat')
@@ -63,14 +66,18 @@ def read_training_data(data_path):
     vfeats = []
     captions = []
     vids = []
+    read_error = 0
     for feat_f in feat_files:
         vid = os.path.splitext(basename(feat_f))[0]
         cap = vid_to_caption[vid]
-        feat = np.load(feat_f)
-
-        vfeats.append(feat)
-        captions.append(cap)
-        vids.append(vid)
+        try:
+            feat = np.load(feat_f)
+            vfeats.append(feat)
+            captions.append(cap)
+            vids.append(vid)
+        except Exception as e:
+            read_error+=1
+    print('read error count {}'.format(read_error))
     
     return vids, vfeats, captions
 
@@ -280,6 +287,9 @@ def evaluate(encoder, decoder, input_variable, idx2term, max_length):
             decoded_words.append(END_TOKEN)
             break
         else:
+            if ni> len(idx2term):
+                print(ni)
+                print(len(idx2term))
             decoded_words.append(idx2term[ni])
 
         decoder_input = Variable(torch.LongTensor([[ni]]))
@@ -292,9 +302,11 @@ def trainEpochs(encoder, decoder, vfeats, processed_captions, learning_rate, n_e
     start = time.time()
     print_loss_total = 0  # Reset every print_every
 
-    encoder_optimizer = optim.Adagrad(encoder.parameters(), lr=learning_rate)
-    decoder_optimizer = optim.Adagrad(decoder.parameters(), lr=learning_rate*0.1)
-
+    #encoder_optimizer = optim.Adagrad(encoder.parameters(), lr=learning_rate)
+    #decoder_optimizer = optim.Adagrad(decoder.parameters(), lr=learning_rate*0.1)
+    encoder_optimizer = optim.Adam(encoder.parameters(), lr=learning_rate)
+    decoder_optimizer = optim.Adam(decoder.parameters(), lr=learning_rate)
+  
     criterion = nn.NLLLoss()
   
     for epoch in range(1, n_epochs+1):
@@ -315,7 +327,9 @@ def trainEpochs(encoder, decoder, vfeats, processed_captions, learning_rate, n_e
             if USE_CUDA:
                 input_variable, targets = input_variable.cuda(), targets.cuda()
 
-            loss = train(input_variable, targets, encoder, decoder, encoder_optimizer, decoder_optimizer, criterion, teacher_forcing_ratio=1)
+            loss = train(input_variable, targets, encoder, decoder, 
+                encoder_optimizer, decoder_optimizer, criterion, teacher_forcing_ratio=TEACHER_FORCE_RATIO)
+            
             print_loss_total += loss
 
         if epoch % print_every == 0:
@@ -366,11 +380,16 @@ def trainEpochs(encoder, decoder, vfeats, processed_captions, learning_rate, n_e
         if epoch % save_every ==0:
             # set model for evaluate
             encoder.eval()
-            torch.save(encoder.state_dict(), open(os.path.join(save_path, 'epoch_{}_encoder.bin'.format(epoch)), 'wb'))
             decoder.eval()
-            torch.save(decoder.state_dict(), open(os.path.join(save_path, 'epoch_{}_decoder.bin'.format(epoch)), 'wb'))
-            print('--- save model ---')
 
+            try:
+                torch.save(encoder.state_dict(), open(os.path.join(save_path, 'epoch_{}_encoder.bin'.format(epoch)), 'wb'))
+                torch.save(decoder.state_dict(), open(os.path.join(save_path, 'epoch_{}_decoder.bin'.format(epoch)), 'wb'))
+                print('--- save model ---')
+            except Exception as e:
+                print('error occurs when saving models')
+                print(str(e))
+            
 
 def main():
     data_path = 'data'
@@ -472,10 +491,10 @@ def main():
     json.dump(PARAMS, open(os.path.join(sub_path, 'params.json'),'w'))
 
     # main training process
-    trainEpochs(encoder = encoder,
-                         decoder = decoder, 
-                          vfeats = tmpf, 
-                          processed_captions = tmpl, 
+    trainEpochs(encoder = encoder ,
+                          decoder = decoder, 
+                          vfeats = vfeats, 
+                          processed_captions = processed_captions, 
                           learning_rate = LEARNING_RATE, 
                           n_epochs = NUM_EPOCH, 
                           idx2term = idx2term, 
@@ -487,8 +506,9 @@ def main():
 
     # set model for evaluation
     encoder.eval()
-    decoder.eval
+    decoder.eval()
 
+    
     torch.save(encoder.state_dict(), open(os.path.join(sub_path, 'encoder.bin'), 'wb'))
     torch.save(decoder.state_dict(), open(os.path.join(sub_path, 'decoder.bin'), 'wb'))
     
@@ -565,7 +585,7 @@ class AttnDecoderRNN(nn.Module):
         return output, hidden, cell, attn_weights
 
     def initHidden(self, n_sample):
-        result = Variable(torch.zeros(1, n_sample, self.hidden_dim))
+        result = Variable(torch.zeros(self.n_layers, n_sample, self.hidden_dim))
         if USE_CUDA:
             return result.cuda(GPUID)
         else:
