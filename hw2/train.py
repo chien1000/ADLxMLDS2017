@@ -37,20 +37,20 @@ DROPOUT_RATE = 0.2
 GPUID =0
 USE_CUDA = torch.cuda.is_available()
 BATCH_SIZE  = 256
-NUM_EPOCH = 10000
+NUM_EPOCH = 4000
 PRINT_EVERY = 10
 TEST_EVERY = 10
-SAVE_EVERY = 50
+SAVE_EVERY = 100
 LEARNING_RATE = 0.001
 TEACHER_FORCE_RATIO = 0.5
 TESTING_NUM = 1
-SAVE_PREFIX = 'drop20_adam_001'
+SAVE_PREFIX = 'trueteacher50_drop20_adam_001'
 # DATA_PATH = 'data'
 SAVE_PATH = 'models'
 
 PARAMS = {'HIDDEN_DIM':HIDDEN_DIM, 'N_LAYER':N_LAYER, 
         'BIDIRECTIONAL':BIDIRECTIONAL, 'DROPOUT_RATE':DROPOUT_RATE,  
-          'NUM_EPOCH':NUM_EPOCH,  'LEARNING_RATE':LEARNING_RATE, 
+          'NUM_EPOCH':NUM_EPOCH,  'LEARNING_RATE':LEARNING_RATE, 'TEACHER_FORCE_RATIO':TEACHER_FORCE_RATIO,
           'BATCH_SIZE': BATCH_SIZE, 'PAD_IDX':PAD_IDX, 'START_IDX':START_IDX, 'END_IDX':END_IDX,
           'INPUT_MAX_LENGTH': INPUT_MAX_LENGTH, 'TARGET_MAX_LENGTH':TARGET_MAX_LENGTH}
 
@@ -235,14 +235,15 @@ def train(input_variable, target_variable, encoder, decoder, encoder_optimizer, 
     #decoder_cell = encoder_cell # this is using last hidden state for decoder inital hidden state
     decoder_cell = decoder.initHidden(n_sample) # get cell with zero value
 
-    use_teacher_forcing = True if random.random() < teacher_forcing_ratio else False
+    # use_teacher_forcing = True if random.random() < teacher_forcing_ratio else False
 
     for di in range(target_length):
         decoder_output, decoder_hidden, decoder_cell, decoder_attention = decoder(
             decoder_input, decoder_hidden, decoder_cell, encoder_outputs)
 
         loss += criterion(decoder_output, target_variable[di, :])
-        use_teacher_forcing =False
+
+        use_teacher_forcing = True if random.random() < teacher_forcing_ratio else False    
         if use_teacher_forcing:
             # Teacher forcing: Feed the target as the next input
             decoder_input = target_variable[di:di+1, :].view(-1, 1)
@@ -251,6 +252,7 @@ def train(input_variable, target_variable, encoder, decoder, encoder_optimizer, 
             topv, topi = decoder_output.data.topk(1)
             ni = topi
             decoder_input = Variable(ni).cuda(GPUID) if USE_CUDA else Variable(ni)
+            decoder_input = decoder_input.view(-1,1)
 
     loss.backward()
     encoder_optimizer.step()
@@ -301,6 +303,7 @@ def evaluate(encoder, decoder, input_variable, idx2term, max_length):
 def trainEpochs(encoder, decoder, vfeats, processed_captions, learning_rate, n_epochs, idx2term, print_every, test_every, save_every, save_path, test_pairs=None):
     start = time.time()
     print_loss_total = 0  # Reset every print_every
+    print_loss_avg = 0
 
     #encoder_optimizer = optim.Adagrad(encoder.parameters(), lr=learning_rate)
     #decoder_optimizer = optim.Adagrad(decoder.parameters(), lr=learning_rate*0.1)
@@ -327,8 +330,13 @@ def trainEpochs(encoder, decoder, vfeats, processed_captions, learning_rate, n_e
             if USE_CUDA:
                 input_variable, targets = input_variable.cuda(), targets.cuda()
 
+            if print_loss_avg < 0.8:
+                teacher_forcing_ratio = TEACHER_FORCE_RATIO
+            else:
+                teacher_forcing_ratio = 1
+
             loss = train(input_variable, targets, encoder, decoder, 
-                encoder_optimizer, decoder_optimizer, criterion, teacher_forcing_ratio=TEACHER_FORCE_RATIO)
+                encoder_optimizer, decoder_optimizer, criterion, teacher_forcing_ratio=teacher_forcing_ratio)
             
             print_loss_total += loss
 
@@ -480,7 +488,7 @@ def main():
         os.makedirs(SAVE_PATH)
 
     ts = "%d"%(time.time())
-    params = '{}_HS_{}_EP_{}_LR_{}_NLAYER_{}_BIDIR_{}_DROPOUT_{}'.format(SAVE_PREFIX, HIDDEN_DIM, NUM_EPOCH, LEARNING_RATE, N_LAYER, int(BIDIRECTIONAL), DROPOUT_RATE)
+    params = '{}_HS_{}_EP_{}_LR_{}_NLAYER_{}_BIDIR_{}_DROPOUT_{}_TEACH_{}'.format(SAVE_PREFIX, HIDDEN_DIM, NUM_EPOCH, LEARNING_RATE, N_LAYER, int(BIDIRECTIONAL), DROPOUT_RATE, TEACHER_FORCE_RATIO)
     sub_path = os.path.join(SAVE_PATH,params)
     if not os.path.exists(sub_path):
         os.makedirs(sub_path)
