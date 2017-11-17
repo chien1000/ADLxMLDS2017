@@ -115,7 +115,9 @@ def main(model_dir, data_dir, output_fname):
     params_path = os.path.join(model_dir, 'params.json')
 
     tmeta = pickle.load(open(trainging_meta_path,'rb'))
-    idx2term = tmeta[0]
+    # print(tmeta)
+    idx2term = tmeta #[0]
+    # print(idx2term)
     
     params = json.load(open(params_path,'r'))
 
@@ -143,10 +145,10 @@ def main(model_dir, data_dir, output_fname):
         encoder = encoder.cuda()
         decoder = decoder.cuda()
 
-    # vids, vfeats = read_features(data_dir)
-    specified_list = ['klteYv1Uv9A_27_33.avi', '5YJaS2Eswg0_22_26.avi', 'UbmZAe5u5FI_132_141.avi', 'JntMAcTlOF0_50_70.avi', 'tJHUH9tpqPg_113_118.avi']
-    vids, vfeats = read_features_specified(data_dir, specified_list)
-    print(vids)
+    vids, vfeats = read_features(data_dir)
+    # specified_list = ['klteYv1Uv9A_27_33.avi', '5YJaS2Eswg0_22_26.avi', 'UbmZAe5u5FI_132_141.avi', 'JntMAcTlOF0_50_70.avi', 'tJHUH9tpqPg_113_118.avi']
+    # vids, vfeats = read_features_specified(data_dir, specified_list)
+    # print(vids)
 
     predict_lines = []
     for vid, vfeat in zip(vids, vfeats):
@@ -154,15 +156,16 @@ def main(model_dir, data_dir, output_fname):
 
         pred_words = evaluate(encoder, decoder, eval_var, idx2term, params['TARGET_MAX_LENGTH'])
         
-        try:
+        if 'PAD' in pred_words:
+            # print(pred_words[-1]=='PAD')
+            # print(len(pred_words[-1]))
             pred_words.remove('PAD')
+        if 'START' in pred_words:
             pred_words.remove('START')
+        if 'END' in pred_words:
             pred_words.remove('END')
 
-        except Exception as e:
-            pass
-
-        predict_lines.append('{},{}'.format(vid, ''.join(pred_words)))
+        predict_lines.append('{},{}'.format(vid, ' '.join(pred_words).replace('PAD','').capitalize()))
     
     with open( output_fname, 'w') as fout:
         # fout.write('id,phone_sequence\n')
