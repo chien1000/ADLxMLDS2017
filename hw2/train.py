@@ -36,6 +36,7 @@ DROPOUT_RATE = 0.2
 
 GPUID =0
 USE_CUDA = torch.cuda.is_available()
+USE_ATTENTION = False
 BATCH_SIZE  = 256
 NUM_EPOCH = 4000
 PRINT_EVERY = 10
@@ -52,7 +53,8 @@ PARAMS = {'HIDDEN_DIM':HIDDEN_DIM, 'N_LAYER':N_LAYER,
         'BIDIRECTIONAL':BIDIRECTIONAL, 'DROPOUT_RATE':DROPOUT_RATE,  
           'NUM_EPOCH':NUM_EPOCH,  'LEARNING_RATE':LEARNING_RATE, 'TEACHER_FORCE_RATIO':TEACHER_FORCE_RATIO,
           'BATCH_SIZE': BATCH_SIZE, 'PAD_IDX':PAD_IDX, 'START_IDX':START_IDX, 'END_IDX':END_IDX,
-          'INPUT_MAX_LENGTH': INPUT_MAX_LENGTH, 'TARGET_MAX_LENGTH':TARGET_MAX_LENGTH}
+          'INPUT_MAX_LENGTH': INPUT_MAX_LENGTH, 'TARGET_MAX_LENGTH':TARGET_MAX_LENGTH,
+          'USE_ATTENTION':USE_ATTENTION}
 
 def read_training_data(data_path):
     feat_path = join(data_path,'training_data/feat')
@@ -465,13 +467,18 @@ def main():
                                              n_layers = N_LAYER, 
                                              bidirectional = BIDIRECTIONAL, 
                                              dropout_rate = DROPOUT_RATE)
-                    
-    decoder = AttnDecoderRNN(hidden_dim = HIDDEN_DIM, 
-                                                    output_dim = output_dim, 
-                                                     n_layers = N_LAYER, 
-                                                     dropout = DROPOUT_RATE, 
-                                                     max_length=INPUT_MAX_LENGTH)
-        
+    if USE_ATTENTION:
+        decoder = AttnDecoderRNN(hidden_dim = HIDDEN_DIM, 
+                                                        output_dim = output_dim, 
+                                                         n_layers = N_LAYER, 
+                                                         dropout = DROPOUT_RATE, 
+                                                         max_length=INPUT_MAX_LENGTH)
+    else:
+        decoder = DecoderRNN(hidden_dim = HIDDEN_DIM, 
+                            output_dim = output_dim, 
+                             n_layers = N_LAYER, 
+                             dropout = DROPOUT_RATE)
+
     print(encoder)
     print(decoder)
                     
@@ -501,8 +508,8 @@ def main():
     # main training process
     trainEpochs(encoder = encoder ,
                           decoder = decoder, 
-                          vfeats = vfeats, 
-                          processed_captions = processed_captions, 
+                          vfeats = vfeats, #vfeats, 
+                          processed_captions = processed_captions,#processed_captions, 
                           learning_rate = LEARNING_RATE, 
                           n_epochs = NUM_EPOCH, 
                           idx2term = idx2term, 
@@ -555,6 +562,32 @@ class EncoderRNN(nn.Module):
         else:
             return result
 
+class DecoderRNN(nn.Module):
+    def __init__(self, hidden_dim, output_dim, n_layers=1, dropout=0.1):
+        super(DecoderRNN, self).__init__()
+        self.n_layers = n_layers
+        self.hidden_dim = hidden_dim
+
+        self.embedding = nn.Embedding(output_dim, hidden_dim)
+        self.dropout = nn.Dropout(dropout)
+        self.lstm = nn.LSTM(hidden_dim, hidden_dim, num_layers=n_layers, dropout = dropout)
+        self.out = nn.Linear(hidden_dim, output_dim)
+        self.softmax = nn.LogSoftmax()
+
+    def forward(self, input_, hidden, cell, encoder_outputs=None):
+        output = self.embedding(input_)[:, 0, :]
+        output = self.dropout(output)
+        output = F.relu(output)
+        output, (hidden,cell) = self.lstm(output, (hidden,cell))
+        output = self.softmax(self.out(output[-1, :, :]))
+        return output, hidden, cell, None
+
+    def initHidden(self, n_sample):
+        result = Variable(torch.zeros(self.n_layers, n_sample, self.hidden_dim))
+        if USE_CUDA:
+            return result.cuda(GPUID)
+        else:
+            return result
 
 class AttnDecoderRNN(nn.Module):
     def __init__(self, hidden_dim, output_dim, n_layers=1, dropout=0.1, max_length=INPUT_MAX_LENGTH):
@@ -562,13 +595,13 @@ class AttnDecoderRNN(nn.Module):
         self.hidden_dim = hidden_dim
         self.output_dim = output_dim
         self.n_layers = n_layers
-        self.dropout = dropout
+        self.dropout_rate = dropout
         self.max_length = max_length
 
         self.embedding = nn.Embedding(self.output_dim, self.hidden_dim)
         self.attn = nn.Linear(self.hidden_dim * 2, self.max_length)
         self.attn_combine = nn.Linear(self.hidden_dim * 2, self.hidden_dim)
-        self.dropout = nn.Dropout(self.dropout)
+        self.dropout = nn.Dropout(self.dropout_rate)
         self.lstm = nn.LSTM(hidden_dim, hidden_dim, num_layers=n_layers, dropout = dropout)
         self.out = nn.Linear(self.hidden_dim, self.output_dim)
         self.LogSoftmax = nn.LogSoftmax()

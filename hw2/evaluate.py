@@ -12,7 +12,7 @@ from collections import defaultdict
 import time
 
 import numpy as np
-from train import AttnDecoderRNN, EncoderRNN, evaluate, get_variable_from_seq
+from train import AttnDecoderRNN, DecoderRNN, EncoderRNN, evaluate, get_variable_from_seq
 # from models import LSTMRecognizer, CNN_LSTMRecognizer
 
 def read_features(data_path):
@@ -126,12 +126,19 @@ def main(model_dir, data_dir, output_fname):
                                              n_layers = params['N_LAYER'], 
                                              bidirectional = params['BIDIRECTIONAL'], 
                                              dropout_rate = params['DROPOUT_RATE'])
-                    
-    decoder = AttnDecoderRNN(hidden_dim = params['HIDDEN_DIM'], 
-                                                    output_dim = params['output_dim'], 
-                                                     n_layers = params['N_LAYER'], 
-                                                     dropout = params['DROPOUT_RATE'], 
-                                                     max_length = params['INPUT_MAX_LENGTH']) 
+    if params['USE_ATTENTION']:              
+        decoder = AttnDecoderRNN(hidden_dim = params['HIDDEN_DIM'], 
+                                                        output_dim = params['output_dim'], 
+                                                         n_layers = params['N_LAYER'], 
+                                                         dropout = params['DROPOUT_RATE'], 
+                                                         max_length = params['INPUT_MAX_LENGTH']) 
+    else:
+        decoder = DecoderRNN(hidden_dim = params['HIDDEN_DIM'], 
+                                                        output_dim = params['output_dim'], 
+                                                         n_layers = params['N_LAYER'], 
+                                                         dropout = params['DROPOUT_RATE'])
+        
+
 
     encoder.load_state_dict(torch.load(encoder_path, map_location={'cuda:0': 'cpu','cuda:1':'cpu','cuda:2':'cpu','cuda:3':'cpu'}))
     decoder.load_state_dict(torch.load(decoder_path, map_location={'cuda:0': 'cpu','cuda:1':'cpu','cuda:2':'cpu','cuda:3':'cpu'}))
