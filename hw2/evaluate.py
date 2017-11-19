@@ -31,7 +31,8 @@ def read_features(data_path):
     return vids, vfeats
 
 def read_features_specified(data_path, specified_list):
-    feat_path = join(data_path,'testing_data/feat')
+    # feat_path = join(data_path,'testing_data/feat')
+    feat_path = data_path
     feat_files = [join(feat_path, f+'.npy') for f in specified_list]
     
     vfeats = []
@@ -106,7 +107,7 @@ def write_outputs(lines):
         fout.write('\n'.join(lines))
     
 
-def main(model_dir, data_dir, output_fname):
+def main(model_dir, data_dir, id_to_predict, output_fname):
 
     trainging_meta_path = os.path.join(model_dir,'training_meta.pkl')
 
@@ -152,10 +153,13 @@ def main(model_dir, data_dir, output_fname):
         encoder = encoder.cuda()
         decoder = decoder.cuda()
 
-    vids, vfeats = read_features(data_dir)
+    # vids, vfeats = read_features(data_dir)
     # specified_list = ['klteYv1Uv9A_27_33.avi', '5YJaS2Eswg0_22_26.avi', 'UbmZAe5u5FI_132_141.avi', 'JntMAcTlOF0_50_70.avi', 'tJHUH9tpqPg_113_118.avi']
-    # vids, vfeats = read_features_specified(data_dir, specified_list)
-    # print(vids)
+    with open(id_to_predict, 'r') as fin:
+        specified_list = fin.readlines()
+        specified_list = list(map(str.strip, specified_list))
+    vids, vfeats = read_features_specified(data_dir, specified_list)
+    print(vids)
 
     predict_lines = []
     for vid, vfeat in zip(vids, vfeats):
@@ -181,11 +185,12 @@ def main(model_dir, data_dir, output_fname):
 
 if __name__ == '__main__':
     import sys
-    if len(sys.argv) == 4:
+    if len(sys.argv) == 5:
         model_dir = sys.argv[1] 
         data_dir = sys.argv[2]
-        output_fname = sys.argv[3]
-        main(model_dir, data_dir, output_fname)
+        id_to_predict = sys.argv[3]
+        output_fname = sys.argv[4]
+        main(model_dir, data_dir, id_to_predict, output_fname)
 
     else:
         print('incorrect argument number')
