@@ -575,7 +575,7 @@ class DecoderRNN(nn.Module):
         self.softmax = nn.LogSoftmax()
 
     def forward(self, input_, hidden, cell, encoder_outputs=None):
-        output = self.embedding(input_)[:, 0, :]
+        output = self.embedding(input_)[:, 0, :].unsqueeze(0)
         output = self.dropout(output)
         output = F.relu(output)
         output, (hidden,cell) = self.lstm(output, (hidden,cell))
