@@ -18,7 +18,7 @@ import random
 import time
 import pickle
 import math
-
+import matplotlib.pyplot as plt
 
 PAD_IDX = 0
 START_IDX = 1
@@ -30,22 +30,23 @@ INPUT_MAX_LENGTH = 80
 TARGET_MAX_LENGTH = 42
 
 HIDDEN_DIM = 256
+EMBEDDING_DIM = 256
 N_LAYER = 1
 BIDIRECTIONAL = False
 DROPOUT_RATE = 0.2
 
 GPUID =0
 USE_CUDA = torch.cuda.is_available()
-USE_ATTENTION = False
+USE_ATTENTION = True
 BATCH_SIZE  = 256
 NUM_EPOCH = 4000
 PRINT_EVERY = 10
 TEST_EVERY = 10
-SAVE_EVERY = 100
+SAVE_EVERY = 200
 LEARNING_RATE = 0.001
 TEACHER_FORCE_RATIO = 0.5
 TESTING_NUM = 1
-SAVE_PREFIX = 'trueteacher50_drop20_adam_001'
+SAVE_PREFIX = 'hh_trueteacher50_drop20_adam_001'
 # DATA_PATH = 'data'
 SAVE_PATH = 'models'
 
@@ -233,7 +234,8 @@ def train(input_variable, target_variable, encoder, decoder, encoder_optimizer, 
     decoder_input = decoder_input.cuda(GPUID) if USE_CUDA else decoder_input
 
     ##TODO choose what to initialize?
-    decoder_hidden = encoder_outputs[-1, :, :].unsqueeze(0).contiguous()
+    # decoder_hidden = encoder_outputs[-1, :, :].unsqueeze(0).contiguous()
+    decoder_hidden = encoder_hidden[-1, :, :].unsqueeze(0).contiguous()
     #decoder_cell = encoder_cell # this is using last hidden state for decoder inital hidden state
     decoder_cell = decoder.initHidden(n_sample) # get cell with zero value
 
@@ -263,7 +265,7 @@ def train(input_variable, target_variable, encoder, decoder, encoder_optimizer, 
     return loss.data[0] / target_length
 
 
-def evaluate(encoder, decoder, input_variable, idx2term, max_length):
+def evaluate(encoder, decoder, input_variable, idx2term, max_length, show_attn=False):
 
     n_sample = input_variable.size()[1]
 
@@ -279,12 +281,15 @@ def evaluate(encoder, decoder, input_variable, idx2term, max_length):
     decoder_cell = decoder.initHidden(n_sample) # get cell with zero value
 
     decoded_words = []
+    decoder_attentions = torch.zeros(max_length, INPUT_MAX_LENGTH)
 
     assert max_length > 0
     for di in range(max_length):
         decoder_output, decoder_hidden, decoder_cell, decoder_attention = decoder(
             decoder_input, decoder_hidden, decoder_cell, encoder_hiddens)
 
+        # import pdb;pdb.set_trace()
+        decoder_attentions[di,] = decoder_attention.data[0,]
         topv, topi = decoder_output.data.topk(1)
         ni = topi[0][0]
         if ni == END_IDX:
@@ -299,6 +304,8 @@ def evaluate(encoder, decoder, input_variable, idx2term, max_length):
         decoder_input = Variable(torch.LongTensor([[ni]]))
         decoder_input = decoder_input.cuda(GPUID) if USE_CUDA else decoder_input
 
+    if show_attn:
+        plt.matshow(decoder_attentions[:di + 1].numpy())
     return decoded_words
 
 
@@ -597,10 +604,11 @@ class AttnDecoderRNN(nn.Module):
         self.n_layers = n_layers
         self.dropout_rate = dropout
         self.max_length = max_length
+        self.embed_dim = EMBEDDING_DIM
 
-        self.embedding = nn.Embedding(self.output_dim, self.hidden_dim)
-        self.attn = nn.Linear(self.hidden_dim * 2, self.max_length)
-        self.attn_combine = nn.Linear(self.hidden_dim * 2, self.hidden_dim)
+        self.embedding = nn.Embedding(self.output_dim, self.embed_dim)
+        self.attn = nn.Linear(self.hidden_dim+self.embed_dim , self.max_length)
+        self.attn_combine = nn.Linear(self.hidden_dim+self.embed_dim, self.hidden_dim)
         self.dropout = nn.Dropout(self.dropout_rate)
         self.lstm = nn.LSTM(hidden_dim, hidden_dim, num_layers=n_layers, dropout = dropout)
         self.out = nn.Linear(self.hidden_dim, self.output_dim)
