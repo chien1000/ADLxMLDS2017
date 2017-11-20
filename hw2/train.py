@@ -18,7 +18,8 @@ import random
 import time
 import pickle
 import math
-
+# import matplotlib.pyplot as plt
+from beam_search import Sequence, TopN
 
 PAD_IDX = 0
 START_IDX = 1
@@ -30,21 +31,23 @@ INPUT_MAX_LENGTH = 80
 TARGET_MAX_LENGTH = 42
 
 HIDDEN_DIM = 256
+EMBEDDING_DIM = 256
 N_LAYER = 1
 BIDIRECTIONAL = False
 DROPOUT_RATE = 0.2
 
 GPUID =0
 USE_CUDA = torch.cuda.is_available()
+USE_ATTENTION = True
 BATCH_SIZE  = 256
 NUM_EPOCH = 4000
 PRINT_EVERY = 10
 TEST_EVERY = 10
-SAVE_EVERY = 100
+SAVE_EVERY = 200
 LEARNING_RATE = 0.001
 TEACHER_FORCE_RATIO = 0.5
 TESTING_NUM = 1
-SAVE_PREFIX = 'trueteacher50_drop20_adam_001'
+SAVE_PREFIX = 'hh_trueteacher50_drop20_adam_001'
 # DATA_PATH = 'data'
 SAVE_PATH = 'models'
 
@@ -52,7 +55,8 @@ PARAMS = {'HIDDEN_DIM':HIDDEN_DIM, 'N_LAYER':N_LAYER,
         'BIDIRECTIONAL':BIDIRECTIONAL, 'DROPOUT_RATE':DROPOUT_RATE,  
           'NUM_EPOCH':NUM_EPOCH,  'LEARNING_RATE':LEARNING_RATE, 'TEACHER_FORCE_RATIO':TEACHER_FORCE_RATIO,
           'BATCH_SIZE': BATCH_SIZE, 'PAD_IDX':PAD_IDX, 'START_IDX':START_IDX, 'END_IDX':END_IDX,
-          'INPUT_MAX_LENGTH': INPUT_MAX_LENGTH, 'TARGET_MAX_LENGTH':TARGET_MAX_LENGTH}
+          'INPUT_MAX_LENGTH': INPUT_MAX_LENGTH, 'TARGET_MAX_LENGTH':TARGET_MAX_LENGTH,
+          'USE_ATTENTION':USE_ATTENTION}
 
 def read_training_data(data_path):
     feat_path = join(data_path,'training_data/feat')
@@ -231,7 +235,8 @@ def train(input_variable, target_variable, encoder, decoder, encoder_optimizer, 
     decoder_input = decoder_input.cuda(GPUID) if USE_CUDA else decoder_input
 
     ##TODO choose what to initialize?
-    decoder_hidden = encoder_outputs[-1, :, :].unsqueeze(0).contiguous()
+    # decoder_hidden = encoder_outputs[-1, :, :].unsqueeze(0).contiguous()
+    decoder_hidden = encoder_hidden[-1, :, :].unsqueeze(0).contiguous()
     #decoder_cell = encoder_cell # this is using last hidden state for decoder inital hidden state
     decoder_cell = decoder.initHidden(n_sample) # get cell with zero value
 
@@ -261,7 +266,7 @@ def train(input_variable, target_variable, encoder, decoder, encoder_optimizer, 
     return loss.data[0] / target_length
 
 
-def evaluate(encoder, decoder, input_variable, idx2term, max_length):
+def evaluate(encoder, decoder, input_variable, idx2term, max_length, show_attn=False):
 
     n_sample = input_variable.size()[1]
 
@@ -272,17 +277,22 @@ def evaluate(encoder, decoder, input_variable, idx2term, max_length):
     # prepare decoder input data which the fist input is the index of start of sentence
     decoder_input = Variable(torch.LongTensor([[START_IDX]]))  # SOS
     decoder_input = decoder_input.cuda(GPUID) if USE_CUDA else decoder_input
-    decoder_hidden = encoder_hiddens[-1, :, :].unsqueeze(0)
+    # decoder_hidden = encoder_hiddens[-1, :, :].unsqueeze(0)
+    decoder_hidden = encoder_hidden[-1, :, :].unsqueeze(0)
     #decoder_cell = encoder_cell
     decoder_cell = decoder.initHidden(n_sample) # get cell with zero value
 
     decoded_words = []
+    decoder_attentions = torch.zeros(max_length, INPUT_MAX_LENGTH)
 
     assert max_length > 0
     for di in range(max_length):
         decoder_output, decoder_hidden, decoder_cell, decoder_attention = decoder(
             decoder_input, decoder_hidden, decoder_cell, encoder_hiddens)
 
+        # import pdb;pdb.set_trace()
+        if decoder_attention:
+            decoder_attentions[di,] = decoder_attention.data[0,]
         topv, topi = decoder_output.data.topk(1)
         ni = topi[0][0]
         if ni == END_IDX:
@@ -297,6 +307,92 @@ def evaluate(encoder, decoder, input_variable, idx2term, max_length):
         decoder_input = Variable(torch.LongTensor([[ni]]))
         decoder_input = decoder_input.cuda(GPUID) if USE_CUDA else decoder_input
 
+    if show_attn and decoder_attention:
+        plt.matshow(decoder_attentions[:di + 1].numpy())
+    return decoded_words
+
+def evaluate_by_beamsearch(encoder, decoder, input_variable, idx2term, max_length, beam_size = 3):
+
+    n_sample = input_variable.size()[1] # = 1
+
+    # encoder forward
+    input_variable = input_variable.cuda(GPUID) if USE_CUDA else input_variable
+    encoder_hiddens, (encoder_hidden, encoder_cell) = encoder(input_variable)
+
+    # prepare decoder input data which the fist input is the index of start of sentence
+    decoder_input = Variable(torch.LongTensor([[START_IDX]]))  # SOS
+    decoder_input = decoder_input.cuda(GPUID) if USE_CUDA else decoder_input
+    # decoder_hidden = encoder_hiddens[-1, :, :].unsqueeze(0)
+    decoder_hidden = encoder_hidden[-1, :, :].unsqueeze(0)
+    #decoder_cell = encoder_cell
+    decoder_cell = decoder.initHidden(n_sample) # get cell with zero value
+
+    partial_sequences = TopN(beam_size)
+    complete_sequences = TopN(beam_size)
+
+    decoder_output, decoder_hidden, decoder_cell, decoder_attention = decoder(
+            decoder_input, decoder_hidden, decoder_cell, encoder_hiddens)
+
+    logprobs, words = decoder_output.data.topk(beam_size, 1)
+
+
+    # Create first beam_size candidate hypotheses
+    for k in range(beam_size):
+        seq = Sequence(
+            sentence = [START_IDX] + [words[0,k]],
+            state = (decoder_hidden, decoder_cell),
+            logprob = logprobs[0,k],
+            score = logprobs[0,k])
+        partial_sequences.push(seq)
+
+    # Run beam search.
+    for di in range(1, max_length):
+        partial_sequence_list = partial_sequences.extract()
+        partial_sequences.reset()
+
+        # Keep a flattened list of parial hypotheses, to easily feed
+        # through a model as whole batch
+        input_feed = [seq.sentence[-1] for seq in partial_sequence_list]
+        input_feed =  Variable(torch.LongTensor([input_feed]))
+        input_feed = input_feed.cuda(GPUID) if USE_CUDA else input_feed
+
+        decoder_hidden = torch.cat([seq.state[0] for seq in partial_sequence_list],1)
+        decoder_cell = torch.cat([seq.state[1] for seq in partial_sequence_list],1)
+
+
+        decoder_output, decoder_hidden, decoder_cell, decoder_attention = decoder(
+        input_feed, decoder_hidden, decoder_cell, encoder_hiddens)
+        logprobs, words = decoder_output.data.topk(beam_size+1, 1) #+1:eos
+
+        k = 0
+        num_hyp = 0
+        prev_k = 0
+        for prev_k in range(beam_size):
+            while num_hyp < beam_size:
+                w = words[prev_k, k]
+                sentence = partial_sequence_list[prev_k].sentence + [w]
+                logprob = partial_sequence_list[prev_k].logprob + logprobs[prev_k, k]
+                score = logprob
+                state = (decoder_hidden[:,prev_k,:].unsqueeze(1), decoder_cell[:,prev_k,:].unsqueeze(1))
+                k += 1
+                num_hyp += 1
+
+                if w == END_IDX:
+                    beam = Sequence(sentence, state, logprob, score)
+                    complete_sequences.push(beam)
+                    num_hyp -= 1  # we can fit another hypotheses as this one is over
+                else:
+                    beam = Sequence(sentence, state, logprob, score)
+                    partial_sequences.push(beam)
+
+    # If we have no complete sequences then fall back to the partial sequences.
+    # But never output a mixture of complete and partial sequences because a
+    # partial sequence could have a higher score than all the complete
+    # sequences.
+    if not complete_sequences.size():
+        complete_sequences = partial_sequences
+    seq = complete_sequences.extract(sort=True)[0]
+    decoded_words = [idx2term[widx] for widx in seq.sentence]
     return decoded_words
 
 
@@ -465,13 +561,18 @@ def main():
                                              n_layers = N_LAYER, 
                                              bidirectional = BIDIRECTIONAL, 
                                              dropout_rate = DROPOUT_RATE)
-                    
-    decoder = AttnDecoderRNN(hidden_dim = HIDDEN_DIM, 
-                                                    output_dim = output_dim, 
-                                                     n_layers = N_LAYER, 
-                                                     dropout = DROPOUT_RATE, 
-                                                     max_length=INPUT_MAX_LENGTH)
-        
+    if USE_ATTENTION:
+        decoder = AttnDecoderRNN(hidden_dim = HIDDEN_DIM, 
+                                                        output_dim = output_dim, 
+                                                         n_layers = N_LAYER, 
+                                                         dropout = DROPOUT_RATE, 
+                                                         max_length=INPUT_MAX_LENGTH)
+    else:
+        decoder = DecoderRNN(hidden_dim = HIDDEN_DIM, 
+                            output_dim = output_dim, 
+                             n_layers = N_LAYER, 
+                             dropout = DROPOUT_RATE)
+
     print(encoder)
     print(decoder)
                     
@@ -501,8 +602,8 @@ def main():
     # main training process
     trainEpochs(encoder = encoder ,
                           decoder = decoder, 
-                          vfeats = vfeats, 
-                          processed_captions = processed_captions, 
+                          vfeats = vfeats, #vfeats, 
+                          processed_captions = processed_captions,#processed_captions, 
                           learning_rate = LEARNING_RATE, 
                           n_epochs = NUM_EPOCH, 
                           idx2term = idx2term, 
@@ -555,6 +656,32 @@ class EncoderRNN(nn.Module):
         else:
             return result
 
+class DecoderRNN(nn.Module):
+    def __init__(self, hidden_dim, output_dim, n_layers=1, dropout=0.1):
+        super(DecoderRNN, self).__init__()
+        self.n_layers = n_layers
+        self.hidden_dim = hidden_dim
+
+        self.embedding = nn.Embedding(output_dim, hidden_dim)
+        self.dropout = nn.Dropout(dropout)
+        self.lstm = nn.LSTM(hidden_dim, hidden_dim, num_layers=n_layers, dropout = dropout)
+        self.out = nn.Linear(hidden_dim, output_dim)
+        self.softmax = nn.LogSoftmax()
+
+    def forward(self, input_, hidden, cell, encoder_outputs=None):
+        output = self.embedding(input_)[:, 0, :].unsqueeze(0)
+        output = self.dropout(output)
+        output = F.relu(output)
+        output, (hidden,cell) = self.lstm(output, (hidden,cell))
+        output = self.softmax(self.out(output[-1, :, :]))
+        return output, hidden, cell, None
+
+    def initHidden(self, n_sample):
+        result = Variable(torch.zeros(self.n_layers, n_sample, self.hidden_dim))
+        if USE_CUDA:
+            return result.cuda(GPUID)
+        else:
+            return result
 
 class AttnDecoderRNN(nn.Module):
     def __init__(self, hidden_dim, output_dim, n_layers=1, dropout=0.1, max_length=INPUT_MAX_LENGTH):
@@ -562,13 +689,14 @@ class AttnDecoderRNN(nn.Module):
         self.hidden_dim = hidden_dim
         self.output_dim = output_dim
         self.n_layers = n_layers
-        self.dropout = dropout
+        self.dropout_rate = dropout
         self.max_length = max_length
+        self.embed_dim = EMBEDDING_DIM
 
-        self.embedding = nn.Embedding(self.output_dim, self.hidden_dim)
-        self.attn = nn.Linear(self.hidden_dim * 2, self.max_length)
-        self.attn_combine = nn.Linear(self.hidden_dim * 2, self.hidden_dim)
-        self.dropout = nn.Dropout(self.dropout)
+        self.embedding = nn.Embedding(self.output_dim, self.embed_dim)
+        self.attn = nn.Linear(self.hidden_dim+self.embed_dim , self.max_length)
+        self.attn_combine = nn.Linear(self.hidden_dim+self.embed_dim, self.hidden_dim)
+        self.dropout = nn.Dropout(self.dropout_rate)
         self.lstm = nn.LSTM(hidden_dim, hidden_dim, num_layers=n_layers, dropout = dropout)
         self.out = nn.Linear(self.hidden_dim, self.output_dim)
         self.LogSoftmax = nn.LogSoftmax()
