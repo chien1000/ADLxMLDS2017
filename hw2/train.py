@@ -18,7 +18,8 @@ import random
 import time
 import pickle
 import math
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
+from beam_search import Sequence, TopN
 
 PAD_IDX = 0
 START_IDX = 1
@@ -276,7 +277,8 @@ def evaluate(encoder, decoder, input_variable, idx2term, max_length, show_attn=F
     # prepare decoder input data which the fist input is the index of start of sentence
     decoder_input = Variable(torch.LongTensor([[START_IDX]]))  # SOS
     decoder_input = decoder_input.cuda(GPUID) if USE_CUDA else decoder_input
-    decoder_hidden = encoder_hiddens[-1, :, :].unsqueeze(0)
+    # decoder_hidden = encoder_hiddens[-1, :, :].unsqueeze(0)
+    decoder_hidden = encoder_hidden[-1, :, :].unsqueeze(0)
     #decoder_cell = encoder_cell
     decoder_cell = decoder.initHidden(n_sample) # get cell with zero value
 
@@ -289,7 +291,8 @@ def evaluate(encoder, decoder, input_variable, idx2term, max_length, show_attn=F
             decoder_input, decoder_hidden, decoder_cell, encoder_hiddens)
 
         # import pdb;pdb.set_trace()
-        decoder_attentions[di,] = decoder_attention.data[0,]
+        if decoder_attention:
+            decoder_attentions[di,] = decoder_attention.data[0,]
         topv, topi = decoder_output.data.topk(1)
         ni = topi[0][0]
         if ni == END_IDX:
@@ -304,8 +307,92 @@ def evaluate(encoder, decoder, input_variable, idx2term, max_length, show_attn=F
         decoder_input = Variable(torch.LongTensor([[ni]]))
         decoder_input = decoder_input.cuda(GPUID) if USE_CUDA else decoder_input
 
-    if show_attn:
+    if show_attn and decoder_attention:
         plt.matshow(decoder_attentions[:di + 1].numpy())
+    return decoded_words
+
+def evaluate_by_beamsearch(encoder, decoder, input_variable, idx2term, max_length, beam_size = 3):
+
+    n_sample = input_variable.size()[1] # = 1
+
+    # encoder forward
+    input_variable = input_variable.cuda(GPUID) if USE_CUDA else input_variable
+    encoder_hiddens, (encoder_hidden, encoder_cell) = encoder(input_variable)
+
+    # prepare decoder input data which the fist input is the index of start of sentence
+    decoder_input = Variable(torch.LongTensor([[START_IDX]]))  # SOS
+    decoder_input = decoder_input.cuda(GPUID) if USE_CUDA else decoder_input
+    # decoder_hidden = encoder_hiddens[-1, :, :].unsqueeze(0)
+    decoder_hidden = encoder_hidden[-1, :, :].unsqueeze(0)
+    #decoder_cell = encoder_cell
+    decoder_cell = decoder.initHidden(n_sample) # get cell with zero value
+
+    partial_sequences = TopN(beam_size)
+    complete_sequences = TopN(beam_size)
+
+    decoder_output, decoder_hidden, decoder_cell, decoder_attention = decoder(
+            decoder_input, decoder_hidden, decoder_cell, encoder_hiddens)
+
+    logprobs, words = decoder_output.data.topk(beam_size, 1)
+
+
+    # Create first beam_size candidate hypotheses
+    for k in range(beam_size):
+        seq = Sequence(
+            sentence = [START_IDX] + [words[0,k]],
+            state = (decoder_hidden, decoder_cell),
+            logprob = logprobs[0,k],
+            score = logprobs[0,k])
+        partial_sequences.push(seq)
+
+    # Run beam search.
+    for di in range(1, max_length):
+        partial_sequence_list = partial_sequences.extract()
+        partial_sequences.reset()
+
+        # Keep a flattened list of parial hypotheses, to easily feed
+        # through a model as whole batch
+        input_feed = [seq.sentence[-1] for seq in partial_sequence_list]
+        input_feed =  Variable(torch.LongTensor([input_feed]))
+        input_feed = input_feed.cuda(GPUID) if USE_CUDA else input_feed
+
+        decoder_hidden = torch.cat([seq.state[0] for seq in partial_sequence_list],1)
+        decoder_cell = torch.cat([seq.state[1] for seq in partial_sequence_list],1)
+
+
+        decoder_output, decoder_hidden, decoder_cell, decoder_attention = decoder(
+        input_feed, decoder_hidden, decoder_cell, encoder_hiddens)
+        logprobs, words = decoder_output.data.topk(beam_size+1, 1) #+1:eos
+
+        k = 0
+        num_hyp = 0
+        prev_k = 0
+        for prev_k in range(beam_size):
+            while num_hyp < beam_size:
+                w = words[prev_k, k]
+                sentence = partial_sequence_list[prev_k].sentence + [w]
+                logprob = partial_sequence_list[prev_k].logprob + logprobs[prev_k, k]
+                score = logprob
+                state = (decoder_hidden[:,prev_k,:].unsqueeze(1), decoder_cell[:,prev_k,:].unsqueeze(1))
+                k += 1
+                num_hyp += 1
+
+                if w == END_IDX:
+                    beam = Sequence(sentence, state, logprob, score)
+                    complete_sequences.push(beam)
+                    num_hyp -= 1  # we can fit another hypotheses as this one is over
+                else:
+                    beam = Sequence(sentence, state, logprob, score)
+                    partial_sequences.push(beam)
+
+    # If we have no complete sequences then fall back to the partial sequences.
+    # But never output a mixture of complete and partial sequences because a
+    # partial sequence could have a higher score than all the complete
+    # sequences.
+    if not complete_sequences.size():
+        complete_sequences = partial_sequences
+    seq = complete_sequences.extract(sort=True)[0]
+    decoded_words = [idx2term[widx] for widx in seq.sentence]
     return decoded_words
 
 
