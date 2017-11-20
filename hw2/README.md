@@ -8,5 +8,5 @@
 
 ### Details
 - models/ : binary files for saved models and pickle outputs
-- train.py : for training
+- model_seq2seq.py : for training
 - evaluate.py : using saved models to evaluate testing data
