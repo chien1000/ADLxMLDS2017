@@ -12,7 +12,7 @@ from collections import defaultdict
 import time
 
 import numpy as np
-from train import AttnDecoderRNN, DecoderRNN, EncoderRNN, evaluate, get_variable_from_seq
+from train import AttnDecoderRNN, DecoderRNN, EncoderRNN, evaluate, get_variable_from_seq, evaluate_by_beamsearch
 # from models import LSTMRecognizer, CNN_LSTMRecognizer
 
 def read_features(data_path):
@@ -127,7 +127,7 @@ def main(model_dir, data_dir, id_to_predict, output_fname):
                                              n_layers = params['N_LAYER'], 
                                              bidirectional = params['BIDIRECTIONAL'], 
                                              dropout_rate = params['DROPOUT_RATE'])
-    if params['USE_ATTENTION']:              
+    if 'USE_ATTENTION' not in params or  params['USE_ATTENTION']:              
         decoder = AttnDecoderRNN(hidden_dim = params['HIDDEN_DIM'], 
                                                         output_dim = params['output_dim'], 
                                                          n_layers = params['N_LAYER'], 
@@ -165,8 +165,9 @@ def main(model_dir, data_dir, id_to_predict, output_fname):
     for vid, vfeat in zip(vids, vfeats):
         eval_var = get_variable_from_seq(vfeat, 'f').unsqueeze(1)
 
-        pred_words = evaluate(encoder, decoder, eval_var, idx2term, params['TARGET_MAX_LENGTH'])
-        
+        #pred_words = evaluate_by_beamsearch(encoder, decoder, eval_var, idx2term, params['TARGET_MAX_LENGTH'], beam_size=10)
+        pred_words = evaluate(encoder, decoder, eval_var, idx2term, params['TARGET_MAX_LENGTH'])      
+
         if 'PAD' in pred_words:
             # print(pred_words[-1]=='PAD')
             # print(len(pred_words[-1]))
