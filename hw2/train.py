@@ -30,7 +30,7 @@ END_TOKEN = 'END'
 INPUT_MAX_LENGTH = 80
 TARGET_MAX_LENGTH = 42
 
-HIDDEN_DIM = 256
+HIDDEN_DIM = 512
 EMBEDDING_DIM = 256
 N_LAYER = 1
 BIDIRECTIONAL = False
@@ -39,7 +39,7 @@ DROPOUT_RATE = 0.2
 GPUID =0
 USE_CUDA = torch.cuda.is_available()
 USE_ATTENTION = True
-BATCH_SIZE  = 256
+BATCH_SIZE  = 300
 NUM_EPOCH = 4000
 PRINT_EVERY = 10
 TEST_EVERY = 10
@@ -47,7 +47,7 @@ SAVE_EVERY = 200
 LEARNING_RATE = 0.001
 TEACHER_FORCE_RATIO = 0.5
 TESTING_NUM = 1
-SAVE_PREFIX = 'hh_trueteacher50_drop20_adam_001'
+SAVE_PREFIX = 'hu512_hh_trueteacher50_drop20_adam_001'
 # DATA_PATH = 'data'
 SAVE_PATH = 'models'
 
@@ -291,7 +291,7 @@ def evaluate(encoder, decoder, input_variable, idx2term, max_length, show_attn=F
             decoder_input, decoder_hidden, decoder_cell, encoder_hiddens)
 
         # import pdb;pdb.set_trace()
-        if decoder_attention:
+        if decoder_attention is not None:
             decoder_attentions[di,] = decoder_attention.data[0,]
         topv, topi = decoder_output.data.topk(1)
         ni = topi[0][0]
@@ -353,7 +353,7 @@ def evaluate_by_beamsearch(encoder, decoder, input_variable, idx2term, max_lengt
         # Keep a flattened list of parial hypotheses, to easily feed
         # through a model as whole batch
         input_feed = [seq.sentence[-1] for seq in partial_sequence_list]
-        input_feed =  Variable(torch.LongTensor([input_feed]))
+        input_feed =  Variable(torch.LongTensor([input_feed])).view(-1,1)
         input_feed = input_feed.cuda(GPUID) if USE_CUDA else input_feed
 
         decoder_hidden = torch.cat([seq.state[0] for seq in partial_sequence_list],1)
@@ -362,7 +362,7 @@ def evaluate_by_beamsearch(encoder, decoder, input_variable, idx2term, max_lengt
 
         decoder_output, decoder_hidden, decoder_cell, decoder_attention = decoder(
         input_feed, decoder_hidden, decoder_cell, encoder_hiddens)
-        logprobs, words = decoder_output.data.topk(beam_size+1, 1) #+1:eos
+        logprobs, words = decoder_output.data.topk(beam_size+2, 1) #+1:eos,pad
 
         k = 0
         num_hyp = 0
@@ -377,7 +377,7 @@ def evaluate_by_beamsearch(encoder, decoder, input_variable, idx2term, max_lengt
                 k += 1
                 num_hyp += 1
 
-                if w == END_IDX:
+                if w == END_IDX  or w == PAD_IDX:
                     beam = Sequence(sentence, state, logprob, score)
                     complete_sequences.push(beam)
                     num_hyp -= 1  # we can fit another hypotheses as this one is over
@@ -389,9 +389,17 @@ def evaluate_by_beamsearch(encoder, decoder, input_variable, idx2term, max_lengt
     # But never output a mixture of complete and partial sequences because a
     # partial sequence could have a higher score than all the complete
     # sequences.
+
     if not complete_sequences.size():
-        complete_sequences = partial_sequences
+         complete_sequences = partial_sequences
     seq = complete_sequences.extract(sort=True)[0]
+
+#    seq1 = complete_sequences.extract(sort=True)[0]
+ #   seq2 = partial_sequences.extrace(sort=True)[0]
+  #  if seq1 > seq2:
+   #     seq = seq1
+  #  else:
+   #     seq = seq2
     decoded_words = [idx2term[widx] for widx in seq.sentence]
     return decoded_words
 
@@ -702,13 +710,14 @@ class AttnDecoderRNN(nn.Module):
         self.LogSoftmax = nn.LogSoftmax()
 
     def forward(self, input_, hidden, cell, encoder_outputs):
+        n_sample = input_.size()[0]
         embedded = self.embedding(input_)[:, 0, :] #batch*embed_dim
         embedded = self.dropout(embedded)
-        
         attn_weights = F.softmax(
             self.attn(torch.cat((embedded,  hidden[0,:,:]), 1))) # batch * max_length
+        #import pdb; pdb.set_trace()
         attn_applied = torch.bmm(attn_weights.unsqueeze(1), #batch * 1 * max_length(seq)
-                                 torch.transpose(encoder_outputs, 0, 1)) # batch * max_length(seq) * hidden_dim 
+                                 torch.transpose(encoder_outputs, 0, 1).expand(n_sample, self.max_length, self.hidden_dim)) # batch * max_length(seq) * hidden_dim 
         attn_applied = attn_applied[:, 0, :] #batch*hidden_dim
 
         output = torch.cat((embedded, attn_applied), 1)
