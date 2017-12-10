@@ -13,6 +13,7 @@ import time
 import os
 
 import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 BATCH_SIZE = 32 #128
@@ -20,10 +21,10 @@ GAMMA = 0.999
 EPS_START = 0.9
 EPS_END = 0.05
 EPS_DECAY = 200
-NUM_EPISODES = 4000
-PRINT_EVERY = 10
+NUM_EPISODES = 40000
+PRINT_EVERY = 30
 SAVE_EVERY = 200
-LEARNING_RATE = 0.0001
+LEARNING_RATE = 0.01
 SAVE_PREFIX = ''
 SAVE_PATH = 'models'
 
@@ -52,6 +53,10 @@ class Agent_DQN(Agent):
 
         if args.test_dqn:
             #you can load your model here
+            self.model_path = args.model_path
+            self.model.load_state_dict(torch.load(self.model_path, map_location={'cuda:0': 'cpu','cuda:1':'cpu','cuda:2':'cpu','cuda:3':'cpu'}))
+            if use_cuda:
+                self.model.cuda()
             print('loading trained model')
 
         if args.train_dqn:
@@ -96,8 +101,9 @@ class Agent_DQN(Agent):
         return observation
 
     def train(self):
-        import pdb; pdb.set_trace()
-        for i_episode in range(NUM_EPISODES):
+        # import pdb; pdb.set_trace()
+        for i_episode in range(1, NUM_EPISODES+1):
+            print('Episode {}/{}'.format(i_episode, NUM_EPISODES))
             # Initialize the environment and state
             q_reward = 0.0
             observation = self.env.reset()
@@ -124,7 +130,8 @@ class Agent_DQN(Agent):
                 if done:
                     self.episode_rewards.append(q_reward)
                     if i_episode % PRINT_EVERY == 0:
-                        self.plot_rewards()
+                        #self.plot_rewards()
+                        print(self.episode_rewards[-29:])
                     break
 
             if i_episode % SAVE_EVERY ==0:
@@ -140,8 +147,8 @@ class Agent_DQN(Agent):
                     print(str(e))
 
         print('Complete')
-        env.render(close=True)
-        env.close()
+        self.env.env.render(close=True)
+        self.env.env.close()
         plt.ioff()
         plt.show()
 
@@ -163,11 +170,13 @@ class Agent_DQN(Agent):
         ##################
         if test:
             #TODO: max outputs?????
+            observation = self.prepro_observation(observation)
             return self.model(Variable(observation, volatile=True).type(FloatTensor)).data.max(1)[1][0] #[1]: index matrix
         else:
             sample = random.random()
             eps_threshold = EPS_END + (EPS_START - EPS_END) * math.exp(-1. * self.steps_done / EPS_DECAY)
             self.steps_done += 1
+            # print('steps {}, eps_threshold {}'.format(self.steps_done, eps_threshold))
             if sample > eps_threshold:
                 return self.model(Variable(observation, volatile=True).type(FloatTensor)).data.max(1)[1].view(1, 1)
             else:
@@ -175,7 +184,7 @@ class Agent_DQN(Agent):
 
 
     def optimize_model(self):
-        if len(self.memory) < BATCH_SIZE:
+        if len(self.memory) < self.memory.capacity:
             return
         # import pdb; pdb.set_trace()
         transitions = self.memory.sample(BATCH_SIZE)
@@ -215,9 +224,9 @@ class Agent_DQN(Agent):
         # Optimize the model
         self.optimizer.zero_grad()
         loss.backward()
-        for param in self.model.parameters():
-            if param.grad is not None:
-                param.grad.data.clamp_(-1, 1)
+        # for param in self.model.parameters():
+            # if param.grad is not None:
+                # param.grad.data.clamp_(-1, 1)
         self.optimizer.step()
 
 
