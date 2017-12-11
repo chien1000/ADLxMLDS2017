@@ -18,7 +18,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 BATCH_SIZE = 32 #128
-GAMMA = 0.999
+GAMMA = 0.99
 TARGET_UPDATE_FREQ = 100
 EVAL_UPDATE_FREQ = 4
 
@@ -31,9 +31,9 @@ EPS_END = 0.05
 EPS_DECAY =  DECAY_STEPS / 10 #200
 
 PRINT_EVERY = 30
-SAVE_EVERY = 200
+SAVE_EVERY = 1000
 LEARNING_RATE = 0.01
-SAVE_PREFIX = ''
+SAVE_PREFIX = '2nets_mse'
 SAVE_PATH = 'models'
 
 PARAMS = {'BATCH_SIZE':BATCH_SIZE, 'GAMMA':GAMMA, 
@@ -118,7 +118,7 @@ class Agent_DQN(Agent):
     def train(self):
         # import pdb; pdb.set_trace()
         for i_episode in count(1): #range(1, NUM_EPISODES+1):
-            print('Episode {}/{}'.format(i_episode, NUM_EPISODES))
+            print('Episode {}/{}, Step {}/{}'.format(i_episode, NUM_EPISODES, self.steps_done, ENV_STEPS))
             # Initialize the environment and state
             q_reward = 0.0
             observation = self.env.reset()
@@ -142,7 +142,7 @@ class Agent_DQN(Agent):
                 self.steps_done += 1
 
                 # Perform one step of the optimization (on the target network)
-                if self.steps_done % EVAL_UPDATE_FREQP == 0:
+                if self.steps_done % EVAL_UPDATE_FREQ == 0:
                     self.optimize_model()
                 if done:
                     self.episode_rewards.append(q_reward)
@@ -191,7 +191,7 @@ class Agent_DQN(Agent):
         if test:
             observation = self.prepro_observation(observation)
             # return self.model(Variable(observation, volatile=True).type(FloatTensor)).data.max(1)[1][0] #[1]: index matrix
-            return self.eval_model(Variable(observation).type(FloatTensor)).data.max(1)[1][0] #[1]: index matrix
+            return self.eval_model.forward(Variable(observation).type(FloatTensor)).data.max(1)[1][0] #[1]: index matrix
         else:
             sample = random.random()
             eps_threshold = EPS_END + (EPS_START - EPS_END) * math.exp(-1. * self.steps_done / EPS_DECAY)
@@ -199,7 +199,7 @@ class Agent_DQN(Agent):
             # print('steps {}, eps_threshold {}'.format(self.steps_done, eps_threshold))
             if sample > eps_threshold:
                 # return self.model(Variable(observation, volatile=True).type(FloatTensor)).data.max(1)[1].view(1, 1)
-                return self.eval_model(Variable(observation).type(FloatTensor)).data.max(1)[1].view(1, 1)
+                return self.eval_model.forward(Variable(observation).type(FloatTensor)).data.max(1)[1].view(1, 1)
             else:
                 return LongTensor([[random.randrange(self.action_count)]])
 
@@ -244,7 +244,8 @@ class Agent_DQN(Agent):
         expected_state_action_values = (next_state_values * GAMMA) + reward_batch
 
         # Compute Huber loss
-        loss = F.smooth_l1_loss(state_action_values, expected_state_action_values)
+        # loss = F.smooth_l1_loss(state_action_values, expected_state_action_values)
+        loss = F.mse_loss(state_action_values, expected_state_action_values)
 
         # Optimize the model
         self.optimizer.zero_grad()
