@@ -7,6 +7,7 @@ import json
 import time
 import numpy as np
 from itertools import count
+import random
 
 import torch
 import torch.nn as nn
@@ -21,8 +22,8 @@ GAMMA = 0.99
 BASELINE = 1
 PRINT_EVERY = 1
 SAVE_EVERY = 100
-SAVE_PREFIX = ''
-SAVE_PATH = 'models'
+SAVE_PREFIX = 'BASELINE'
+SAVE_PATH = 'pg_models'
 
 
 PARAMS = {'LEARNING_RATE':LEARNING_RATE, 'GAMMA':GAMMA, 
@@ -31,16 +32,16 @@ PARAMS = {'LEARNING_RATE':LEARNING_RATE, 'GAMMA':GAMMA,
 
 # if gpu is to be used
 use_cuda = torch.cuda.is_available()
-# FloatTensor = torch.cuda.FloatTensor if use_cuda else torch.FloatTensor
-# LongTensor = torch.cuda.LongTensor if use_cuda else torch.LongTensor
-# ByteTensor = torch.cuda.ByteTensor if use_cuda else torch.ByteTensor
-# Tensor = FloatTensor
-dtype = torch.cuda.FloatTensor if use_cuda else torch.FloatTensor
-class Variable(torch.autograd.Variable):
-    def __init__(self, data, *args, **kwargs):
-        if use_cuda:
-            data = data.cuda()
-        super(Variable, self).__init__(data, *args, **kwargs)
+FloatTensor = torch.cuda.FloatTensor if use_cuda else torch.FloatTensor
+LongTensor = torch.cuda.LongTensor if use_cuda else torch.LongTensor
+ByteTensor = torch.cuda.ByteTensor if use_cuda else torch.ByteTensor
+Tensor = FloatTensor
+# dtype = torch.cuda.FloatTensor if use_cuda else torch.FloatTensor
+# class Variable(torch.autograd.Variable):
+#     def __init__(self, data, *args, **kwargs):
+#         if use_cuda:
+#             data = data.cuda()
+#         super(Variable, self).__init__(data, *args, **kwargs)
 
 
 
@@ -69,6 +70,8 @@ def state_to_variable(state, to_prepro=True):
     state = state.transpose(2, 0, 1).astype(float)
     var = Variable(torch.FloatTensor(state))
     var = var.unsqueeze(0)
+    if use_cuda:
+        var = var.cuda()
 
     return var
 
@@ -83,12 +86,22 @@ class Agent_PG(Agent):
         self.args =args 
         self.env = env
         self.action_count = env.get_action_space().n
+        self.policy = Policy(self.action_count)
+        if use_cuda:
+            self.policy.cuda()
+
         if args.test_pg:
-            #you can load your model here
+            random.seed(136)
+            self.model_path = args.model_path or 'models/pg/model.bin'
+            self.policy.load_state_dict(torch.load(self.model_path, map_location={'cuda:0': 'cpu','cuda:1':'cpu','cuda:2':'cpu','cuda:3':'cpu'}))
+            if use_cuda:
+                self.policy.cuda()
             print('loading trained model')
+            self.is_first =True
+            self.last_state = None
 
         elif args.train_pg:
-            self.policy = Policy(self.action_count)
+            
             self.optimizer = optim.RMSprop(self.policy.parameters(), lr= LEARNING_RATE)
             self.episode_rewards = []
 
@@ -117,14 +130,14 @@ class Agent_PG(Agent):
         ##################
         # YOUR CODE HERE #
         ##################
-        pass
+        self.is_first = True
 
-    def select_action(self, state):
-        state = torch.from_numpy(state).type(dtype).unsqueeze(0)
-        probs = self.policy(Variable(state))
-        m = Categorical(probs)
-        action = m.sample()
-        return action.data[0], m.log_prob(action)
+    # def select_action(self, state):
+    #     state = torch.from_numpy(state).type(dtype).unsqueeze(0)
+    #     probs = self.policy(Variable(state))
+    #     m = Categorical(probs)
+    #     action = m.sample()
+    #     return action.data[0], m.log_prob(action)
 
     def optimize(self):
         R = 0
@@ -138,12 +151,19 @@ class Agent_PG(Agent):
             rewards.insert(0, R)
         # print(self.policy.rewards)
         # print(rewards)
-        rewards = torch.Tensor(rewards)
+        rewards = Tensor(rewards)
         rewards = (rewards - rewards.mean()) / (rewards.std() + np.finfo(np.float32).eps)
-        for log_prob, reward in zip(self.policy.saved_log_probs, rewards):
-            policy_loss.append(-log_prob * reward)
+        rewards = rewards - BASELINE
+        rewards = Variable(rewards, requires_grad=False)
+        # import pdb;pdb.set_trace()
+        saved_log_probs = torch.cat(self.policy.saved_log_probs)
+        policy_loss = (rewards * saved_log_probs*(-1)).sum()
+
+        # for log_prob, reward in zip(self.policy.saved_log_probs, rewards):
+        #     policy_loss.append(-log_prob * reward)
+        # policy_loss = torch.cat(policy_loss).sum()
+
         self.optimizer.zero_grad()
-        policy_loss = torch.cat(policy_loss).sum()
         policy_loss.backward()
         self.optimizer.step()
         del self.policy.rewards[:]
@@ -204,14 +224,26 @@ class Agent_PG(Agent):
                 the predicted action from trained model
         """
 
-        # if test:
-        #     self.policy(observation)
-        state_var = state_to_variable(observation)
-        probs = self.policy(state_var)
-        m = Categorical(probs)
-        action = m.sample()
         if test:
-            return action.data[0]
+            if self.is_first:
+                state_diff = observation - observation
+            else:
+                state_diff = observation - self.last_state
+
+            state_var = state_to_variable(state_diff)
+            # a = self.policy(state_var).data.max(1)[1][0]
+            probs = self.policy(state_var)
+            m = Categorical(probs)
+            action = m.sample()
+            a = action.data[0]
+            self.last_state = observation
+
+            return a
         else:
+            state_var = state_to_variable(observation)
+            probs = self.policy(state_var)
+            m = Categorical(probs)
+            action = m.sample()
+            
             return action.data[0], m.log_prob(action)
 
