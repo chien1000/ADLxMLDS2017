@@ -57,6 +57,13 @@ class DQN(nn.Module):
         self.lrelu = nn.LeakyReLU()
         self.head = nn.Linear(512, action_count)
 
+        self.conv1.weight.data.normal_(0, 0.1)   # initialization
+        self.conv2.weight.data.normal_(0, 0.1)   # initialization
+        self.conv3.weight.data.normal_(0, 0.1)   # initialization
+        self.fc.weight.data.normal_(0, 0.1)   # initialization
+        self.head.weight.data.normal_(0, 0.1)   # initialization
+        
+
     def forward(self, x):
         # x = F.relu(self.bn1(self.conv1(x)))
         # x = F.relu(self.bn2(self.conv2(x)))
@@ -65,7 +72,7 @@ class DQN(nn.Module):
         x = F.relu(self.conv2(x))
         x = F.relu(self.conv3(x))
         x = self.fc(x.view(x.size(0),-1))
-        x = self.lrelu(x)
+        x = F.relu(x)
         x = self.head(x)
         return x
 
