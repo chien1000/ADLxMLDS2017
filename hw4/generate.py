@@ -19,29 +19,16 @@ from torch.autograd import Variable
 import numpy as np
 
 
-# In[20]:
-
-
 from train import Generator, Discriminator, tags_to_ids, to_one_hot, to_variable
-
-
-# In[29]:
 
 
 USE_CUDA = torch.cuda.is_available()
 
-
-# In[28]:
-
-
 seed = 1225
 random.seed(seed)
-torch.manual_seed(seed)
-if USE_CUDA:
-    torch.cuda.manual_seed_all(seed)
-
-
-# In[36]:
+# torch.manual_seed(seed)
+# if USE_CUDA:
+#     torch.cuda.manual_seed_all(seed)
 
 
 def draw_outputs(imgs, names, img_path):
@@ -50,24 +37,18 @@ def draw_outputs(imgs, names, img_path):
         save_path = os.path.join(img_path, names[img_id])
         misc.imsave(save_path, to_draw)
 
-
-# In[32]:
-
-
 def generate(generator, noise_dim, text_var):
     noise = Variable(torch.randn(text_var.size(0), noise_dim))
     if USE_CUDA:
         noise = noise.cuda()
+        text_var = text_var.cuda()
     noise = noise.view(noise.size(0), noise_dim, 1, 1)
     fake_img = generator(text_var, noise)
     
     return fake_img
 
 
-# In[46]:
-
-
-def main(model_dir):
+def main(model_dir, text_file):
     trainging_meta_path = os.path.join(model_dir,'training_meta.pkl')
     # D_path = os.path.join(model_dir, 'discriminator.bin')
     G_path = os.path.join(model_dir, 'generator.bin')
@@ -98,7 +79,7 @@ def main(model_dir):
         os.makedirs(img_path)
 
     test_tags = []
-    with open('data/sample_testing_text.txt') as fin:
+    with open(text_file) as fin:
         for line in fin.readlines():
             tags = line.strip().split(',')[1]
             test_tags.append(tags)
@@ -114,13 +95,12 @@ def main(model_dir):
         draw_outputs(imgs, names, img_path)
 
 
-# In[47]:
-
 
 # model_dir = 'models/_NOISE_100_LR_0.0002_MOMEN_0.5_L1_50_L2_100'
 if __name__ == '__main__':
     import sys
-    if len(sys.argv) > 1:
+    if len(sys.argv) > 2:
         model_dir = sys.argv[1]
-        main(model_dir)
+        text_file = sys.argv[2]
+        main(model_dir, text_file)
 
